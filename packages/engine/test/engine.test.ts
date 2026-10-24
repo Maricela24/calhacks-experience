@@ -214,3 +214,19 @@ describe("DOCX tables have a real grid (release defect DEF-4)", () => {
     }
   });
 });
+
+describe("a skipped message is not labelled as a proposal (DEF-6)", () => {
+  it("titles the plan with the email subject and says nothing was prepared", async () => {
+    const plans: Array<{ title: string; requestSummary: string; requestedOutputs: string[] }> = [];
+    const input = await inputFor("no_action");
+    const result = await runWork(input, { signal: new AbortController().signal, onProgress: async (p) => { if (p.plan) plans.push(p.plan); } });
+    expect(result.outcome).toBe("skipped");
+    expect(plans.length).toBeGreaterThan(0);
+    for (const plan of plans) {
+      expect(plan.title).toBe(input.email.subject.trim().replace(/\s+/g, " ").slice(0, 120));
+      expect(plan.title).not.toMatch(/launch strategy proposal/i);
+      expect(plan.requestSummary).toMatch(/nothing was prepared/);
+      expect(plan.requestedOutputs).toEqual([]);
+    }
+  });
+});

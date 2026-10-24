@@ -27,9 +27,11 @@ export function makePlan(input: EngineInput, sources: SourceDocument[], classifi
   const requestedOutputs: OutputKind[] = classification === "report" ? ["report", "presentation"] : classification === "proposal" || classification === "ambiguous" ? ["proposal", "presentation"] : [];
   const deadline = classification === "proposal" ? resolveDeadline(input.email.bodyText, input.email.receivedAt, input.organization.timezone) : null;
   const client = input.email.subject.match(/\bfor\s+(.+?)\s*$/i)?.[1] ?? "Client";
+  const noRequest = classification === "no_action" || classification === "unsupported";
+  const subject = input.email.subject.trim().replace(/\s+/g, " ").slice(0, 120) || "(no subject)";
   return {
-    title: classification === "report" ? "January-February sales performance update" : classification === "ambiguous" ? "Client proposal and short deck" : `${client} launch strategy proposal`,
-    requestSummary: classification === "report" ? "Prepare a short sales report and five-slide update using only the attached CSV." : classification === "ambiguous" ? "Prepare a client proposal and short presentation after material details are supplied." : "Prepare a review-draft proposal and five-slide kickoff deck for the stated launch strategy engagement.",
+    title: noRequest ? subject : classification === "report" ? "January-February sales performance update" : classification === "ambiguous" ? "Client proposal and short deck" : `${client} launch strategy proposal`,
+    requestSummary: noRequest ? "No supported work request was found in this message, so nothing was prepared." : classification === "report" ? "Prepare a short sales report and five-slide update using only the attached CSV." : classification === "ambiguous" ? "Prepare a client proposal and short presentation after material details are supplied." : "Prepare a review-draft proposal and five-slide kickoff deck for the stated launch strategy engagement.",
     requestedOutputs, dueAt: deadline?.dueAt ?? null,
     dueAtExplanation: deadline?.explanation ?? null,
     steps: ["Extract and normalize authorized sources", "Resolve material unknowns", "Generate grounded structured content", "Verify evidence and calculations", "Export matching Office files"],
