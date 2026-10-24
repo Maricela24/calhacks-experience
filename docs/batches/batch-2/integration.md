@@ -8,7 +8,7 @@ Recorded by: Darren (Person 1). Date of check: 2026-10-23.
 |---|---|
 | Foundation commit | `5d8f342` |
 | `origin/main` | `5d8f342` |
-| `origin/platform` | `5d8f342` (new tests and docs are local, uncommitted) |
+| `origin/platform` | Batch 2 platform work `e5b8510` (parent `5d8f342`), plus a docs-only commit recording this hash |
 | `origin/engine` (Joanne) | **does not exist** |
 | `origin/experience` (Maricella) | **does not exist** |
 | Merged integration commit | none |
@@ -17,7 +17,7 @@ Recorded by: Darren (Person 1). Date of check: 2026-10-23.
 
 ## What was checked on the platform side (not an integration result)
 
-Platform commit state: `5d8f342` + uncommitted working tree. Foundation engine and delivery stubs, placeholder fixtures.
+Platform commit state: `e5b8510` on `platform`. Foundation engine and delivery stubs, placeholder fixtures.
 
 - `pnpm typecheck`, `pnpm lint`, `pnpm test` (74 tests), `pnpm build`: exit 0.
 - Two-process live run (API :4177, worker) with a temp DB: `POST /v1/demo/inject` via `pnpm demo:proposal` → task `a6a7547c-f612-4305-91e5-3f7ac5bc9faf` rev 1 → worker `job.start` → task `failed` with `ENGINE_NOT_IMPLEMENTED` (engine stub, `retryable:false`). Worker heartbeat healthy. This is the correct honest behavior of a missing engine, not a pass.

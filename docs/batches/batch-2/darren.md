@@ -3,7 +3,7 @@
 Batch and owner: Batch 2, Darren / Person 1.
 Branch: `platform`.
 Base/foundation commit: `5d8f342` ("Foundation: workspace, contracts, platform backend, stubs"); `origin/main` and `origin/platform` were both at this commit at the start and after `git fetch` at the end of this session.
-Implementation commit or working-tree status: see the commit named in the final message of this batch (filled in `integration.md`). Before that commit the tree was uncommitted.
+Implementation commit or working-tree status: `e5b8510` on `platform` (parent `5d8f342`). All checks below were run on this content before the commit.
 Teammates: Person 2 = Joanne (engine, fixtures), Person 3 = Maricella (web, delivery). Neither has pushed an `engine` or `experience` branch; `git ls-remote`/`git branch -r` show only `main` and `platform`.
 
 ## 1. Exists versus stubbed (inspected, not assumed)
