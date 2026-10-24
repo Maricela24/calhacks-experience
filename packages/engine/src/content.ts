@@ -70,10 +70,41 @@ export function reportProducts(input: EngineInput, sources: SourceDocument[], pl
   const dataRef = [ref(data, null, `CSV rows 2-${metrics.rows.length + 1}; sums and percent-change formulas computed in code`)];
   const [first, second] = metrics.months;
   const fmtPct = (value: number | null) => value === null ? "undefined (zero denominator)" : `${value.toFixed(value % 1 ? 1 : 0)}%`;
+  // Narrative is derived from the computed metrics, never from the canonical fixture's numbers (DEF-2).
+  const dirOf = (a: number, b: number): "up" | "down" | "same" => (b > a ? "up" : b < a ? "down" : "same");
+  const revDir = dirOf(first!.revenueMinor, second!.revenueMinor);
+  const ordDir = dirOf(first!.orders, second!.orders);
+  const aov = (m: { averageOrderValueMinor: number | null }) => (m.averageOrderValueMinor === null ? null : m.averageOrderValueMinor);
+  const aovA = aov(first!);
+  const aovB = aov(second!);
+  const aovMoney = (v: number | null) => (v === null ? "Unknown" : usd(v));
+  const aovClause = aovA !== null && aovB !== null
+    ? (aovA === aovB ? `while average order value remained ${usd(aovA)}` : `while average order value changed from ${usd(aovA)} to ${usd(aovB)}`)
+    : `while average order value is unknown for ${[aovA === null ? first!.month : null, aovB === null ? second!.month : null].filter(Boolean).join(" and ")}`;
+  const revenueSentence = revDir === "same"
+    ? `Revenue was unchanged at ${usd(first!.revenueMinor)} in both months`
+    : `Revenue ${revDir === "up" ? "increased" : "decreased"} from ${usd(first!.revenueMinor)} in ${first!.month} to ${usd(second!.revenueMinor)} in ${second!.month}, ${revDir === "up" ? "an increase" : "a decrease"} of ${usd(Math.abs(metrics.revenueChangeMinor))} (${fmtPct(metrics.revenueGrowthPercent)})`;
+  const ordersSentence = ordDir === "same"
+    ? `Orders were unchanged at ${first!.orders}`
+    : `Orders ${ordDir === "up" ? "increased" : "decreased"} from ${first!.orders} to ${second!.orders} (${fmtPct(metrics.orderGrowthPercent)})`;
+  const channelChange = metrics.channels.map((channel) => {
+    const a = channel.values[first!.month] ?? 0;
+    const b = channel.values[second!.month] ?? 0;
+    const pct = a === 0 ? null : ((b - a) / a) * 100;
+    return { channel: channel.channel, dir: dirOf(a, b), pct };
+  });
+  const sameChannelChange = channelChange.every((c) => c.dir === channelChange[0]!.dir && c.pct === channelChange[0]!.pct);
+  const channelNote = sameChannelChange && channelChange[0]!.pct !== null
+    ? (channelChange[0]!.dir === "same" ? `${channelChange.length === 2 ? "Both" : "All"} channels were unchanged.` : `${channelChange.length === 2 ? "Both" : "All"} channels ${channelChange[0]!.dir === "up" ? "increased" : "decreased"} by ${fmtPct(Math.abs(channelChange[0]!.pct!))}.`)
+    : `${channelChange.map((c) => `${c.channel} ${c.dir === "same" ? "was unchanged" : `${c.dir === "up" ? "increased" : "decreased"}${c.pct === null ? " from a zero base" : ` by ${fmtPct(Math.abs(c.pct))}`}`}`).join("; ")}.`;
+  const share = metrics.websiteSharePercent;
+  const shareBullet = share[first!.month] === share[second!.month] ? `Website share: ${share[first!.month]}% in both months` : `Website share: ${share[first!.month]}% in ${first!.month}, ${share[second!.month]}% in ${second!.month}`;
+  const aovBullet = aovA !== null && aovA === aovB ? `Average order value: ${usd(aovA)} in both months` : `Average order value: ${aovMoney(aovA)} in ${first!.month}, ${aovMoney(aovB)} in ${second!.month}`;
+  const movement = `${revDir === ordDir ? "Revenue and order growth moved together" : "Revenue and orders moved in different directions"}; ${aovA !== null && aovB !== null ? (aovA === aovB ? "average order value did not change" : "average order value changed") : "average order value is unknown for a month with no orders"}.`;
   const productId = stableId(input.taskId, input.revision, "report", 0);
   const chart: ContentBlock = { id: `${productId}-chart`, kind: "chart", heading: "Revenue by month", text: null, items: [], columns: [], rows: [], chart: { type: "bar", labels: metrics.months.map((item) => item.month), series: [{ name: "Revenue (USD)", values: metrics.months.map((item) => item.revenueMinor / 100) }], unit: "USD" }, evidence: dataRef, basis: "calculated" };
   const blocks: ContentBlock[] = [
-    paragraph(`${productId}-summary`, "Executive summary", `Revenue increased from ${usd(first!.revenueMinor)} in ${first!.month} to ${usd(second!.revenueMinor)} in ${second!.month}, an increase of ${usd(metrics.revenueChangeMinor)} (${fmtPct(metrics.revenueGrowthPercent)}). Orders increased from ${first!.orders} to ${second!.orders} (${fmtPct(metrics.orderGrowthPercent)}), while average order value remained ${usd(first!.averageOrderValueMinor!)}.`, "calculated", dataRef),
+    paragraph(`${productId}-summary`, "Executive summary", `${revenueSentence}. ${ordersSentence}, ${aovClause}.`, "calculated", dataRef),
     chart,
     table(`${productId}-monthly`, "Monthly performance", ["Month", "Revenue", "Orders", "Average order value"], metrics.months.map((item) => [item.month, usd(item.revenueMinor), String(item.orders), item.averageOrderValueMinor === null ? "Unknown" : usd(item.averageOrderValueMinor)]), "calculated", dataRef),
     table(`${productId}-channels`, "Channel revenue", ["Channel", ...metrics.months.map((item) => item.month)], metrics.channels.map((channel) => [channel.channel, ...metrics.months.map((item) => usd(channel.values[item.month] ?? 0))]), "calculated", dataRef),
@@ -84,9 +115,9 @@ export function reportProducts(input: EngineInput, sources: SourceDocument[], pl
   const deckId = stableId(input.taskId, input.revision, "presentation", 0);
   const slides: SlideContent[] = [
     slide(`${deckId}-1`, "January-February sales update", "title", [paragraph(`${deckId}-1a`, "Dataset scope", "Revenue and orders by Website and Partnerships", "source", dataRef)], "All values are calculated from the attached CSV."),
-    slide(`${deckId}-2`, "Revenue grew 25%", "chart", [{ ...chart, id: `${deckId}-2a` }], `${usd(metrics.revenueChangeMinor)} month-over-month increase; causality is not established.`),
-    slide(`${deckId}-3`, "Channel performance", "two_column", metrics.channels.map((channel, index) => bullets(`${deckId}-3${index}`, channel.channel, metrics.months.map((month) => `${month.month}: ${usd(channel.values[month.month] ?? 0)}`), "calculated", dataRef)), "Both channels increased by 25%."),
-    slide(`${deckId}-4`, "Orders and order value", "bullets", [bullets(`${deckId}-4a`, "Key metrics", [`Orders: ${first!.orders} to ${second!.orders} (${fmtPct(metrics.orderGrowthPercent)})`, `Average order value: ${usd(first!.averageOrderValueMinor!)} in both months`, `Website share: ${metrics.websiteSharePercent[first!.month]}% in both months`], "calculated", dataRef)], "Revenue and order growth moved together; average order value did not change."),
+    slide(`${deckId}-2`, revDir === "up" ? `Revenue grew ${fmtPct(metrics.revenueGrowthPercent)}` : revDir === "down" ? `Revenue fell ${fmtPct(metrics.revenueGrowthPercent === null ? null : Math.abs(metrics.revenueGrowthPercent))}` : "Revenue was flat", "chart", [{ ...chart, id: `${deckId}-2a` }], `${usd(Math.abs(metrics.revenueChangeMinor))} month-over-month ${revDir === "up" ? "increase" : revDir === "down" ? "decrease" : "change"}; causality is not established.`),
+    slide(`${deckId}-3`, "Channel performance", "two_column", metrics.channels.map((channel, index) => bullets(`${deckId}-3${index}`, channel.channel, metrics.months.map((month) => `${month.month}: ${usd(channel.values[month.month] ?? 0)}`), "calculated", dataRef)), channelNote),
+    slide(`${deckId}-4`, "Orders and order value", "bullets", [bullets(`${deckId}-4a`, "Key metrics", [`Orders: ${first!.orders} to ${second!.orders} (${fmtPct(metrics.orderGrowthPercent)})`, aovBullet, shareBullet], "calculated", dataRef)], movement),
     slide(`${deckId}-5`, "Limits and next steps", "closing", [bullets(`${deckId}-5a`, "Keep the interpretation bounded", ["Do not infer campaign causality", "Add cost and exposure data", "Track margin and returns", "Continue channel-level monitoring"], "recommendation")], "ROAS, CAC, profit, retention, and conversion are not computable from this dataset."),
   ];
   return [
