@@ -73,6 +73,11 @@ export function calculateSales(csv: string): SalesMetrics {
   };
 }
 
+/** The single display rounding for percentages (one decimal, half away from zero); content and verification both use it. */
+export function displayPercent(value: number): number {
+  return Math.sign(value) * Math.round(Number((Math.abs(value) * 10).toPrecision(12))) / 10;
+}
+
 /** "2026-01" -> "January 2026", computed in UTC so the machine timezone cannot shift it. */
 export function monthLabel(key: string, withYear = true): string {
   const [year, month] = key.split("-").map(Number);

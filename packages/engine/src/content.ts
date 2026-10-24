@@ -1,6 +1,6 @@
 import type { ContentBlock, EngineInput, SlideContent, SourceDocument, SourceRef, WorkPlan, WorkProduct } from "@afterhours/contracts";
 import type { SalesMetrics } from "./calculations";
-import { monthLabel, usd } from "./calculations";
+import { displayPercent, monthLabel, usd } from "./calculations";
 import { formatLocal } from "./dates";
 import { stableId } from "./ids";
 import type { ProposalFacts } from "./proposalFacts";
@@ -98,7 +98,7 @@ export function proposalProducts(input: EngineInput, sources: SourceDocument[], 
   ];
 }
 
-const pctText = (value: number | null) => value === null ? "not computable (zero starting value)" : `${Math.abs(value).toFixed(value % 1 ? 1 : 0)}%`;
+const pctText = (value: number | null) => value === null ? "not computable (zero starting value)" : `${Math.abs(displayPercent(value))}%`;
 function change(value: number | null, delta: number, noun: string): string {
   if (delta === 0) return `${noun} was unchanged`;
   return `${noun} ${delta > 0 ? "increased" : "decreased"} ${pctText(value)}`;

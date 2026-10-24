@@ -1,5 +1,5 @@
 import type { SourceDocument, WorkPlan, WorkProduct } from "@afterhours/contracts";
-import type { SalesMetrics } from "./calculations";
+import { displayPercent, type SalesMetrics } from "./calculations";
 import { EngineError } from "./errors";
 import { deckLayoutIssues } from "./layout";
 import { normalizeWhitespace } from "./sources";
@@ -42,9 +42,12 @@ function productStrings(product: WorkProduct): string[] {
   ];
 }
 
+/** Percent changes are computed to 2 decimals and displayed to 1 (displayPercent); both forms are calculated values. */
+const pctForms = (value: number) => [value, Math.abs(value), Math.abs(displayPercent(value))];
+
 export function metricNumbers(metrics: SalesMetrics): number[] {
   const values: number[] = [metrics.rows.length, metrics.rows.length + 1, metrics.months.length, metrics.channels.length, metrics.revenueChangeMinor / 100, Math.abs(metrics.revenueChangeMinor / 100), metrics.orderChange, Math.abs(metrics.orderChange)];
-  for (const pct of [metrics.revenueGrowthPercent, metrics.orderGrowthPercent]) if (pct !== null) values.push(pct, Math.abs(pct));
+  for (const pct of [metrics.revenueGrowthPercent, metrics.orderGrowthPercent]) if (pct !== null) values.push(...pctForms(pct));
   for (const month of metrics.months) {
     const [year, mm] = month.month.split("-").map(Number);
     values.push(year!, mm!, month.revenueMinor / 100, month.orders);
@@ -52,7 +55,7 @@ export function metricNumbers(metrics: SalesMetrics): number[] {
   }
   for (const channel of metrics.channels) {
     values.push(...Object.values(channel.values).map((value) => value / 100), ...Object.values(channel.sharePercent));
-    if (channel.growthPercent !== null) values.push(channel.growthPercent, Math.abs(channel.growthPercent));
+    if (channel.growthPercent !== null) values.push(...pctForms(channel.growthPercent));
   }
   return values;
 }
