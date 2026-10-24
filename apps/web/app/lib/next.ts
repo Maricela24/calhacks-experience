@@ -5,7 +5,8 @@
  */
 export function safeNext(raw: string | null | undefined): string {
   if (!raw || raw.length > 500) return "/";
-  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\") || /[\u0000-\u001f]/.test(raw)) return "/";
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/";
+  for (let i = 0; i < raw.length; i++) if (raw.charCodeAt(i) < 32) return "/";
   if (raw.startsWith("/login")) return "/";
   try {
     const u = new URL(raw, "http://local.invalid");
