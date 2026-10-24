@@ -2,7 +2,7 @@
 
 Owner: Darren / Person 1. Branch: `platform`.
 Base commit: `b442c71` (Batch 2 platform tip, includes `e5b8510`). `git fetch origin` at the end of the session shows only `origin/main` (`5d8f342`) and `origin/platform` (`b442c71`).
-Candidate commit: **none — uncommitted working tree on top of `b442c71`.** No hash is claimed.
+Candidate commit: `29a3570` on `platform` (parent `b442c71`). Content-identical to what the checks below ran on.
 Integrated gate: **BLOCKED.** There is no `engine`, `experience` or Eden QA branch on origin, so the Batch 2 gate (real Office files + browser review) was never closed and Batch 3 cannot be integrated.
 
 ## Scope done (platform side, independent of teammates)
