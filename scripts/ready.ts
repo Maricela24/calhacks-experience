@@ -1,6 +1,6 @@
 // Startup readiness check. Makes no paid provider calls and no network calls.
 import net from "node:net";
-import { bootstrapDb, loadConfig, loadRootEnv, pendingMigrations } from "@afterhours/data";
+import { apiPortMismatch, bootstrapDb, loadConfig, loadRootEnv, pendingMigrations } from "@afterhours/data";
 
 loadRootEnv();
 let failed = false;
@@ -23,6 +23,8 @@ try {
   const db = bootstrapDb(config);
   check(pendingMigrations(db).length === 0, "database migrated", config.databasePath.replace(config.repoRoot, "."));
   db.close();
+  const mismatch = apiPortMismatch(config);
+  check(mismatch === null, "API_PORT matches API_ORIGIN", mismatch ?? `${config.apiOrigin}`);
   check(await portFree(config.apiPort), `API port ${config.apiPort} available`, "FAIL here may just mean the API is already running");
   check(await portFree(3000), "web port 3000 available", "FAIL here may just mean the web app is already running");
   const engine = await import("@afterhours/engine");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DeliveryInput, EngineDependencies, EngineInput, EngineResult } from "@afterhours/contracts";
-import { getTaskDetail, getTaskSummary, openDb, recoverExpiredJobs, type AppConfig, type Db } from "@afterhours/data";
+import { getTaskDetail, getTaskSummary, injectDemo, loadDemoFixture, openDb, recoverExpiredJobs, type AppConfig, type Db } from "@afterhours/data";
 import { injectTask, makeTestConfig, makeTestDb, readyResult, testPlan, testSources } from "@afterhours/data/testing";
 import { runWork as stubRunWork } from "@afterhours/engine";
 import { sendNotification as stubSend } from "@afterhours/delivery";
@@ -43,6 +43,19 @@ describe("worker job execution", () => {
     const n = getTaskDetail(db, taskId).notifications[0]!;
     expect(n.state).toBe("simulated");
     expect(await worker.processNextNotification()).toBe(false); // no resend
+  });
+
+  it("hands the engine the fixture's original receivedAt, not the injection or run time", async () => {
+    let seen: EngineInput | undefined;
+    const { db, config, worker } = make(async (input, deps) => { seen = input; return happy(input, deps); });
+    const fixtureReceivedAt = loadDemoFixture(config.repoRoot, "proposal").fixture.email.receivedAt;
+    const injectedAt = new Date(Date.now() - 5000);
+    const out = injectDemo(db, config, "proposal", "date-1", injectedAt);
+    expect(out.kind).toBe("task");
+    expect(await worker.processNextJob()).toBe(true);
+    expect(seen?.email.receivedAt).toBe(fixtureReceivedAt);
+    expect(seen?.email.receivedAt).not.toBe(injectedAt.toISOString());
+    expect(seen?.now).not.toBe(fixtureReceivedAt);
   });
 
   it("passes the immutable snapshot (attachments, org, scenario, mode) to the engine", async () => {
