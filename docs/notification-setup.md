@@ -71,11 +71,20 @@ Several: `Good morning. N requests are ready for review.`, up to 5 bullet titles
 Titles are flattened, stripped of links and control characters, and cut to 80 characters; the message is capped at 1000
 characters. No email body, source text, or attachment content is ever included.
 
+## Operator policy enforced by the worker (Darren, `platform-batch5`)
+
+The worker (not this package) refuses a live send unless: Twilio credentials and sender exist, `WHATSAPP_USE_CASE_ELIGIBLE=true`,
+`TWILIO_WHATSAPP_TO` (the designated test recipient) exists and equals the recipient in Settings, and either the customer-service
+window is open or `TWILIO_CONTENT_SID` is set. Otherwise the notification is `blocked` with a reason the UI shows. A queued live
+message whose channel or recipient is edited afterwards is `blocked` as `POLICY_CHANGED` ("Not sent (settings changed)"). A
+provider response that may have been accepted but is not confirmed is `failed` / `DELIVERY_UNCERTAIN`; it is never resent and the
+UI says so. The adapter in this package never retries.
+
 ## Tested versus untested
 
 - Tested (`pnpm test`, `packages/delivery/test/delivery.test.ts`, 26 tests, mocked provider client): composition, outbox
   makes no request, every blocked condition, template mapping, open-window send, accepted-not-delivered, error mapping,
   redaction.
-- **Not tested: any real Twilio request.** No credentials or approved template were available. A live send must be
+- **Not tested: any real Twilio request (still true after Batches 4 and 5).** No credentials or approved template were available. A live send must be
   verified by the team with their own account before claiming it works.
 - Not built: delivery status callbacks (P2). Without one, `accepted` is as far as a notification ever goes.

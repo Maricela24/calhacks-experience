@@ -1,3 +1,5 @@
+> **SUPERSEDED** by `docs/release/demo-script.md` (final, with measured timing, roles and fallbacks). Kept for history.
+
 # Demo script (2 to 3 minutes)
 
 Say up front what is real and what is not: **the worker runs continuously, and "overnight" is time-compressed for this

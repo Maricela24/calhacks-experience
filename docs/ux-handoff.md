@@ -85,6 +85,14 @@ starts a second stack whose live model has no credentials, to exercise the real 
 dismiss paths. Open gap: the real engine returns `quote: null` for every evidence reference (Joanne), so the real-quote
 browser test is BLOCKED and the runner exits 3.
 
+## Batches 4 to 6 (live status wording, overnight display, release)
+
+Reports: `docs/batches/batch-{4,5,6}/maricella.md`; demo: `docs/release/demo-script.md`; video claims: `docs/release/video-claim-check.md`.
+Notification wording comes from `describeNotification` (uncertain, policy-changed, queued-is-a-plan); the task and notification
+views show "Files prepared" and "Currently planned for" in the workspace timezone; offline banner; mutations never queue while
+offline; Gmail callback markers `not_configured`, `redirect_mismatch`, `scope`; chart text readable on phones. Everything live
+(Gmail, live model, WhatsApp) is BLOCKED for lack of accounts and is shown as disconnected/not configured/blocked.
+
 ## Not verified / remaining
 
 - Real engine output (Joanne), live model, live Gmail, live WhatsApp: none exercised from the UI.
