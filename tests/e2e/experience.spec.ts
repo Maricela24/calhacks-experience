@@ -488,10 +488,10 @@ test("20. offline: actions fail visibly and are never queued to fire on reconnec
   await expect(page.getByRole("button", { name: "Mark reviewed" })).toBeEnabled();
 });
 
-test("21. a revoked (expired) session on a deep link returns to login, then back to the same task", async ({ browser, page }) => {
+test("21. on a phone: a revoked (expired) session on a deep link returns to login, then back to the same task", async ({ browser, page }) => {
   await login(page);
   const { taskId } = await inject(page.request, "no_action");
-  const ctx = await browser.newContext();
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } }); // a phone opening a notification link
   const p = await ctx.newPage();
   // Take a real session, then revoke it on the server while the browser still holds the cookie.
   const res = await p.request.post(`${BASE}/api/session`, { headers: { origin: new URL(BASE).origin, "content-type": "application/json" }, data: { password: PASSWORD } });
@@ -547,4 +547,25 @@ test("22. quiet hours: files are ready now, the notification shows its planned t
   } finally {
     await patch({ notifications: { quietHours: { enabled: false, start: "22:00", end: "07:00", timezone: tz }, digestTime: "08:00" } });
   }
+});
+
+test("23. a failed download shows an error and never saves a file", async ({ page }) => {
+  await needEngine(page);
+  const { taskId } = await inject(page.request, "proposal");
+  await page.goto(`/tasks/${taskId}`);
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
+  let saved = false;
+  page.on("download", () => { saved = true; });
+  // The server answers with a JSON error instead of a file; the page must not turn that into a document.
+  await page.route("**/api/artifacts/*/download", (route) => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { code: "INTERNAL", message: "Simulated failure", requestId: "r" } }) }));
+  await page.getByRole("button", { name: /Download .*\.docx/ }).click();
+  await expect(page.getByRole("alert").filter({ hasText: /Simulated failure|server answered|Something went wrong/ }).first()).toBeVisible();
+  await expect(page.getByText(/^Downloaded /)).toHaveCount(0);
+  await page.waitForTimeout(500);
+  expect(saved).toBe(false);
+  await expect(page.getByRole("button", { name: /Retry download/ })).toBeVisible();
+  // After the problem clears, retrying produces a real file.
+  await page.unroute("**/api/artifacts/*/download");
+  const docx = await downloadFile(page, /Retry download of .*\.docx/);
+  expectOfficeZip(docx.bytes, "word/document.xml");
 });
