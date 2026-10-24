@@ -33,6 +33,12 @@ Status: proposed (needs Maricella's yes before Darren merges it). Workaround tod
 
 ## Platform notes (not amendments)
 
+- Batch 4 (Darren): `SettingsPatchSchema` is now strict at every nesting level (`organization`, `organization.brand`,
+  `notifications`, `notifications.quietHours`). Unknown keys return 400 instead of being dropped silently, so the
+  browser cannot believe it set credentials or eligibility. Field checks added in the data layer: recipient E.164 or
+  null, brand colors `#RRGGBB`, currency 3 uppercase letters, organization text length caps. No route, type or
+  response shape changed. Maricella: send only the documented editable fields.
+
 - Node: the spec prefers Node 24 LTS. The shared dev machines run Node 20.x, so the workspace targets
   `node >=20.12` and pins `better-sqlite3@12` (v13 requires Node 22+). The Docker image uses Node 22.
   Switching everyone to Node 24 later only needs `better-sqlite3` re-evaluated.

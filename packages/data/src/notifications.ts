@@ -1,5 +1,6 @@
 import { DateTime } from "luxon";
 import type { NotificationRecord, WorkspaceSettings } from "@afterhours/contracts";
+import type { AppConfig } from "./config";
 import type { Db } from "./db";
 import { badRequest } from "./errors";
 import { addEvent } from "./events";
@@ -52,6 +53,25 @@ export function scheduleNotification(settings: WorkspaceSettings, now: Date): Sc
     localDate: target.toISODate(),
     timezone: q.timezone,
   };
+}
+
+/**
+ * Operator-side policy for a live WhatsApp send, computed from server configuration only (never from a
+ * browser assertion). Returns the reason a send must be blocked, or null when the adapter may be called.
+ * Live sends go only to the operator-designated test recipient (TWILIO_WHATSAPP_TO).
+ */
+export function whatsappPolicyProblem(
+  config: AppConfig, settings: WorkspaceSettings, now: Date,
+): string | null {
+  const w = config.whatsapp;
+  if (!w.twilioAccountSid || !w.twilioAuthToken || !w.from) return "WhatsApp is not configured on the server (Twilio credentials and sender are missing).";
+  if (!w.useCaseEligible) return "The operator has not confirmed that this use case is eligible for WhatsApp (WHATSAPP_USE_CASE_ELIGIBLE=false).";
+  if (!w.to) return "No operator-designated WhatsApp test recipient is configured (TWILIO_WHATSAPP_TO).";
+  const recipient = settings.notifications.recipient ?? w.to;
+  if (recipient !== w.to) return "The recipient in Settings is not the operator-designated test recipient; live sends are refused.";
+  const windowOpen = !!w.customerServiceWindowUntil && Date.parse(w.customerServiceWindowUntil) > now.getTime();
+  if (!windowOpen && !w.contentSid) return "The customer-service window is closed and no approved template (TWILIO_CONTENT_SID) is configured.";
+  return null;
 }
 
 interface NotifRow {

@@ -6,9 +6,9 @@ import {
 import {
   ArtifactValidationError, EngineResultError, LIMITS, LeaseLostError, MAX_ATTEMPTS, appendProgress,
   clientWithTokens, claimDueNotification, claimNextJob, cleanStaging, commitEngineResult, completeNotification,
-  createGmailApi, failNotification, getSettings, getTaskRow, modelStatus, parseJson, pollGmailOnce, publishArtifactFiles,
-  recordExecutionFailure, recordWorkerHeartbeat, recoverExpiredJobs, recoverNotificationLeases, releaseJob,
-  heartbeatJob, validateEngineResult,
+  createGmailApi, failNotification, getSettings, getTaskRow, parseJson, pollGmailOnce, publishArtifactFiles,
+  liveModelProblem, recordExecutionFailure, recordWorkerHeartbeat, recoverExpiredJobs, recoverNotificationLeases, releaseJob,
+  heartbeatJob, validateEngineResult, whatsappPolicyProblem,
   type AppConfig, type ClaimedJob, type Db, type GmailApi, type GmailTokens,
 } from "@afterhours/data";
 import type { Logger } from "./log";
@@ -32,13 +32,22 @@ export interface WorkerDeps {
 
 interface SafeFailure { code: string; message: string; retryable: boolean }
 
+/** Defense in depth: provider errors are stored and shown, so strip anything shaped like a credential. */
+export function redact(message: string): string {
+  return message
+    .replace(/\b(sk|rk|pk)-[A-Za-z0-9_-]{8,}/g, "[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\bya29\.[A-Za-z0-9._-]+/g, "[redacted]")
+    .replace(/\b1\/\/[A-Za-z0-9._-]{10,}/g, "[redacted]");
+}
+
 function classify(err: unknown): SafeFailure {
   const e = err as { code?: unknown; retryable?: unknown; message?: unknown; name?: unknown };
   if (err instanceof EngineResultError || err instanceof ArtifactValidationError) {
     return { code: err instanceof EngineResultError ? err.code : "ARTIFACT_INVALID", message: String((err as Error).message).slice(0, 500), retryable: false };
   }
   if (typeof e?.code === "string" && typeof e?.retryable === "boolean") {
-    return { code: e.code, message: String(e.message ?? "The engine reported an error.").slice(0, 500), retryable: e.retryable };
+    return { code: e.code, message: redact(String(e.message ?? "The engine reported an error.")).slice(0, 500), retryable: e.retryable };
   }
   return { code: "ENGINE_UNEXPECTED_ERROR", message: "The engine failed unexpectedly. Check worker logs for the error code.", retryable: false };
 }
@@ -77,10 +86,9 @@ export function createWorker(deps: WorkerDeps) {
     if (rows.length > LIMITS.maxFiles || total > LIMITS.maxTotalBytes || rows.some((r) => r.size_bytes > LIMITS.maxFileBytes)) {
       throw Object.assign(new Error("Attachments exceed the supported size limits."), { code: "ATTACHMENT_TOO_LARGE", retryable: false });
     }
-    if (task.generation_mode === "live" && !modelStatus(config).configured) {
-      throw Object.assign(new Error(
-        "Live generation is selected but no model credentials are configured on the server. Set the provider API key or switch GENERATION_MODE=fixture for new tasks.",
-      ), { code: "MODEL_NOT_CONFIGURED", retryable: false });
+    if (task.generation_mode === "live") {
+      const problem = liveModelProblem(config);
+      if (problem) throw Object.assign(new Error(problem.message), { code: problem.code, retryable: false });
     }
     const scenario = FixtureScenarioSchema.safeParse(task.fixture_scenario);
     return EngineInputSchema.parse({
@@ -89,7 +97,10 @@ export function createWorker(deps: WorkerDeps) {
       mode: task.generation_mode,
       email,
       attachments: rows.map((r) => ({ id: r.attachment_id, filename: r.filename, mimeType: r.mime_type, bytes: new Uint8Array(r.bytes) })),
-      organization: OrganizationProfileSchema.parse(getSettings(db).organization),
+      // Ingestion-time snapshot; settings edits after ingestion do not change this task's context.
+      organization: OrganizationProfileSchema.parse(
+        task.organization_json ? JSON.parse(task.organization_json) : getSettings(db).organization,
+      ),
       answers: parseJson<WorkAnswer[]>(task.answers_json, []),
       now: now().toISOString(),
       fixtureScenario: scenario.success ? scenario.data : null,
@@ -175,10 +186,21 @@ export function createWorker(deps: WorkerDeps) {
     if (!claim) return false;
     const settings = getSettings(db);
     const until = config.whatsapp.customerServiceWindowUntil;
+    if (claim.channel === "whatsapp") {
+      // Operator policy is enforced here, before any provider code runs: a blocked configuration is
+      // terminal (no retry loop) and the ready result stays reviewable in the dashboard.
+      const problem = whatsappPolicyProblem(config, settings, now());
+      if (problem) {
+        completeNotification(db, claim.id, claim.ownerToken,
+          { state: "blocked", message: "Not sent: live WhatsApp delivery is blocked.", providerMessageId: null, reason: problem }, now());
+        log("info", "notification.done", { notificationId: claim.id, state: "blocked" });
+        return true;
+      }
+    }
     const input: DeliveryInput = {
       notificationId: claim.id,
       channel: claim.channel,
-      recipient: settings.notifications.recipient ?? config.whatsapp.to,
+      recipient: claim.channel === "whatsapp" ? config.whatsapp.to : (settings.notifications.recipient ?? config.whatsapp.to),
       publicAppUrl: config.publicAppUrl,
       tasks: claim.tasks,
       deliveryPolicy: {
@@ -189,6 +211,18 @@ export function createWorker(deps: WorkerDeps) {
     };
     try {
       const result = DeliveryResultSchema.parse(await deps.sendNotification(input));
+      if (result.state === "accepted" && !result.providerMessageId) {
+        // "accepted" means the provider returned a message id; without one the outcome is unknown.
+        failNotification(db, claim.id, claim.ownerToken,
+          { message: "DELIVERY_UNCERTAIN: the provider reported acceptance without a message id. It was not resent.", retryable: false }, now());
+        log("warn", "notification.failed", { notificationId: claim.id, code: "DELIVERY_UNCERTAIN" });
+        return true;
+      }
+      if (result.state === "simulated" && claim.channel !== "outbox") {
+        failNotification(db, claim.id, claim.ownerToken,
+          { message: "DELIVERY_ADAPTER_ERROR: a live channel returned a simulated result; nothing was sent.", retryable: false }, now());
+        return true;
+      }
       completeNotification(db, claim.id, claim.ownerToken, result, now());
       log("info", "notification.done", { notificationId: claim.id, state: result.state });
     } catch (err) {

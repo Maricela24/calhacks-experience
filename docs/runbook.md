@@ -13,9 +13,11 @@ pnpm dev
 ## Modes — always disclosed in the UI and status endpoint
 
 - `GENERATION_MODE=fixture` (default): Person 2's fixture intelligence. Disclose as fixture output.
-- `GENERATION_MODE=live`: requires `MODEL_PROVIDER` (`openai` | `anthropic`) and the matching API key. Missing key
-  → `GET /api/integrations` shows `model.configured=false`, and tasks fail with `MODEL_NOT_CONFIGURED`.
-  Mode is snapshotted per task at ingestion; changing it affects only new tasks.
+- `GENERATION_MODE=live`: requires `MODEL_PROVIDER=openai`, `MODEL_NAME` and `OPENAI_API_KEY` (the engine implements
+  only OpenAI; `anthropic` fails with `MODEL_PROVIDER_UNSUPPORTED`). Anything missing → `GET /api/integrations` shows
+  `model.configured=false`, `pnpm check:ready` prints an INFO line, and live tasks fail nonretryably with
+  `MODEL_NOT_CONFIGURED` before the engine runs. There is never a fixture fallback.
+  Mode and the organization profile are snapshotted per task at ingestion; changing them affects only new tasks.
 - Demo injection (`ingestionMode=demo`) vs real Gmail (`ingestionMode=gmail`) is stored per task.
 
 ## Gmail (P1) — Google Cloud console steps
@@ -24,11 +26,33 @@ pnpm dev
 2. OAuth consent screen: User type **External**, publishing status **Testing**. Add the dedicated test inbox under
    **Test users**. Scope: `https://www.googleapis.com/auth/gmail.readonly` only.
 3. Credentials → Create **OAuth client ID** → **Web application**. Authorized redirect URI must exactly equal
-   `GOOGLE_REDIRECT_URI` (local default `http://localhost:3000/api/integrations/gmail/callback`).
+   `GOOGLE_REDIRECT_URI`, and `GOOGLE_REDIRECT_URI` must be exactly `PUBLIC_APP_URL` + `/api/integrations/gmail/callback`
+   (local default `http://localhost:3000/api/integrations/gmail/callback`). It is the **browser-facing web origin**,
+   never the private API port (4000/4177): the session cookie lives on the web origin and the Next proxy forwards
+   `/api/*` to the API. A mismatch makes `pnpm check:ready` FAIL and Connect return `503 GMAIL_REDIRECT_MISMATCH`.
 4. Put `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `.env`. Restart API and worker.
 5. In the app: Settings → add the test sender to **allowed senders** (exact address) → Connect Gmail.
 6. Send a new email from the allowed sender to the test inbox. The worker polls every
    `GMAIL_POLL_INTERVAL_SECONDS` (15 s). Only messages received after connecting are processed.
+
+### Polling behaviour (Batch 4)
+
+- History: a message whose Gmail `internalDate` is more than 30 s before `connectedAt` is never ingested. The listing
+  itself overlaps 120 s behind the checkpoint; the handled-id list plus the unique `gmail:<integration>:<messageId>`
+  source key make repeats harmless.
+- Bounds per 15 s cycle: at most 5 list pages × 50 ids, at most 10 messages fetched, oldest first. The checkpoint
+  only advances to the newest message actually processed.
+- More than 250 new messages in the window: the window's end is halved and saved, nothing is processed that cycle,
+  and halving repeats until the window lists completely. It is then drained oldest-first and reopened. The checkpoint
+  never moves past an unlisted message.
+- A malformed message is recorded in `intake_audit` (`malformed_message`) and skipped; it cannot block the inbox.
+- Gating before any download, task or model call: exact allowed-sender match; an explicit `dmarc=fail` in Gmail's
+  `Authentication-Results` for an allowed address is refused (`sender_authentication_failed`). Fixture `.example`
+  addresses are never live senders unless the operator adds them. Unknown senders only add a bounded audit row.
+- Gmail is read-only: no remote images, links or macros are fetched; HTML is reduced to text locally.
+- Revoked/expired credentials pause polling (no calls to Google) until Reconnect. Quota/5xx errors keep polling.
+- Disconnect deletes the stored tokens first, then revokes at Google. Each connection has a rotating
+  `connection_token`; a token refresh or poll result from a disconnected or replaced connection is discarded.
 
 Testing-mode limits: refresh tokens for unverified apps in Testing status expire after about 7 days; only listed test
 users can connect. A successful test connection is **not** Google production verification.
@@ -41,6 +65,9 @@ users can connect. A successful test connection is **not** Google production ver
 | `reason=no_refresh_token` | Remove the app at myaccount.google.com/permissions, then reconnect (consent is forced). |
 | Status `error`: "Reconnect Gmail in Settings" | Token revoked/expired (Testing tokens expire ~7 days). Disconnect and reconnect. Task history is kept. |
 | `503 GMAIL_NOT_CONFIGURED` | Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. |
+| `503 GMAIL_REDIRECT_MISMATCH` | Set `GOOGLE_REDIRECT_URI` to `PUBLIC_APP_URL` + `/api/integrations/gmail/callback`, and register that exact URI in Google Cloud. |
+| `reason=scope` | The Gmail read permission was unticked on Google's consent screen. Connect again and allow it. |
+| `reason=expired` | More than 10 minutes passed between Connect and the callback. Start again. |
 | Mail ignored | Sender not in allowed senders (exact match), automation disabled, or message older than the connection. |
 
 ## Using a different API port locally
@@ -76,9 +103,12 @@ Shell variables win over `.env` values. If `API_ORIGIN` is left unset the defaul
 ## Notifications
 
 Default channel `outbox`: messages are composed and stored as `simulated`; nothing is sent. Live WhatsApp needs
-Twilio credentials, `WHATSAPP_USE_CASE_ELIGIBLE=true` (operator-confirmed policy eligibility), and either an open
-customer-service window (`WHATSAPP_CUSTOMER_SERVICE_WINDOW_UNTIL`) or an approved `TWILIO_CONTENT_SID`. Otherwise
-results are `blocked` with a reason. `accepted` means provider acceptance only. A live send interrupted by a crash
+Twilio credentials, `WHATSAPP_USE_CASE_ELIGIBLE=true` (operator-confirmed policy eligibility), an operator-designated
+test recipient `TWILIO_WHATSAPP_TO`, and either an open customer-service window
+(`WHATSAPP_CUSTOMER_SERVICE_WINDOW_UNTIL`) or an approved `TWILIO_CONTENT_SID`. The worker checks this from server
+configuration before any provider code runs; otherwise the notification is `blocked` (terminal, no retry loop) with the
+reason, also shown in `GET /api/integrations`. Live sends go only to `TWILIO_WHATSAPP_TO`: a different recipient typed
+in Settings is refused, not used. `accepted` means provider acceptance only. A live send interrupted by a crash
 is recorded as failed/uncertain and never resent automatically.
 
 Quiet hours (Settings) delay delivery only; work continues. Results during quiet hours join one digest per local

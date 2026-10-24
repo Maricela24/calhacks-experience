@@ -204,3 +204,32 @@ Extracted-text caps for model input are the engine's job.
 ### Still blocked (needs teammates' branches)
 Real engine outputs for report, ambiguous and no_action; real browser clarification flow; Eden's independent run; the merged
 Batch 2/3 gate. See `docs/batches/batch-3/darren.md` and `docs/batches/batch-2/integration.md`.
+
+## Batch 4 platform: Gmail live intake and live wiring (branch `platform-batch4`)
+
+Migration `002_batch4_gmail_live.sql` adds `integrations.connection_token`, `integrations.auth_failed_at` and
+`tasks.organization_json`. It applies to existing databases (checked on a copy of a local DB); older tasks keep a NULL
+snapshot and fall back to current settings.
+
+- **OAuth** (`apps/api/src/routes/integrations.ts`): scope `gmail.readonly` only; state is 24 random bytes, stored as a
+  hash, bound to the session, 10-minute expiry, consumed on first use even when that use fails. New: start refuses with
+  `503 GMAIL_REDIRECT_MISMATCH` unless `GOOGLE_REDIRECT_URI` = `PUBLIC_APP_URL/api/integrations/gmail/callback`; the
+  callback refuses tokens that lack the read scope (`reason=scope`, token revoked). Disconnect deletes locally, then revokes.
+- **Connection identity** (`packages/data/src/integrations.ts`): `connection_token` rotates per connect. `updateGmailTokens`
+  and `recordGmailPoll` write only for the current token (IMMEDIATE transaction), so a late refresh or a finishing poll
+  cannot resurrect a disconnected or replaced connection.
+- **Polling** (`packages/data/src/gmail/poll.ts`): see runbook "Polling behaviour". New exports: `CONNECT_SKEW_SECONDS`,
+  `PAGE_SIZE`, `MAX_PAGES`, `MAX_MESSAGES_PER_CYCLE`, `isGmailAuthError`; `PollResult.status` adds `paused` and `superseded`.
+- **Live model** (`packages/data/src/config.ts`): `liveModelProblem(config)` mirrors the engine's requirements;
+  `modelStatus().configured` uses it. The worker fails unconfigured live tasks with `MODEL_NOT_CONFIGURED` or
+  `MODEL_PROVIDER_UNSUPPORTED` before calling `runWork`. Engine error messages are passed through `redact()` before storage.
+- **Snapshots**: `ingestMessage` stores the organization profile; the worker uses it for every revision of that task.
+- **Delivery** (`whatsappPolicyProblem` in `packages/data/src/notifications.ts`): operator-only policy, enforced in the
+  worker before `sendNotification`; designated recipient only; `accepted` without a provider id, or `simulated` from a
+  live channel, is recorded as failed and not resent.
+- **Status**: `GET /v1/integrations` explains a disconnected Gmail (missing credentials or redirect mismatch) and the
+  WhatsApp block reason in `lastError`; never secrets.
+
+Tests: `packages/data/test/batch4.test.ts` (17), `apps/api/test/batch4.test.ts` (15), `apps/worker/test/batch4.test.ts`
+(15). Google, the engine and the delivery adapter are mocks in these tests, except that the consent URL is built by the
+real `google-auth-library`. Not proven: a live Google account, a live model call, a live WhatsApp send.

@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import {
   GmailConfigError, authUrl, buildOAuthClient, clientWithTokens, consumeOauthState, createGmailApi, createOauthState,
-  disconnectGmail, exchangeCode, getGmailTokens, getIntegrationStatus, lookupSession, saveGmailConnection,
-  DomainError, type GmailTokens,
+  disconnectGmail, exchangeCode, getGmailTokens, getIntegrationStatus, lookupSession, oauthRedirectProblem,
+  saveGmailConnection, DomainError, GMAIL_SCOPES, type GmailTokens,
 } from "@afterhours/data";
 import type { Ctx } from "../app";
 
@@ -39,6 +39,12 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Ctx, inject
   }));
 
   app.get("/v1/integrations/gmail/start", { preHandler: ctx.requireSession }, async (req, reply) => {
+    if (!ctx.config.google.clientId || !ctx.config.google.clientSecret) {
+      throw new DomainError("GMAIL_NOT_CONFIGURED", "Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.", 503);
+    }
+    // A callback on any origin other than PUBLIC_APP_URL cannot carry the session cookie, so refuse early.
+    const redirectProblem = oauthRedirectProblem(ctx.config);
+    if (redirectProblem) throw new DomainError("GMAIL_REDIRECT_MISMATCH", redirectProblem, 503);
     let url: string;
     const state = createOauthState(ctx.db, req.sessionId!, ctx.now());
     try {
@@ -65,6 +71,12 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Ctx, inject
     try {
       const tokens = await port.exchange(q.code);
       if (!tokens.refresh_token) return reply.redirect(back("error&reason=no_refresh_token"));
+      // The user can untick the permission on Google's consent screen; without read access polling cannot work.
+      const granted = (tokens.scope ?? "").split(/\s+/);
+      if (tokens.scope && !GMAIL_SCOPES.every((sc) => granted.includes(sc))) {
+        try { await port.revoke(tokens); } catch { /* best effort */ }
+        return reply.redirect(back("error&reason=scope"));
+      }
       const email = await port.profileEmail(tokens);
       saveGmailConnection(ctx.db, ctx.config.tokenEncryptionKey, { account: email, tokens }, ctx.now());
       return reply.redirect(back("connected"));
@@ -77,8 +89,9 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Ctx, inject
   app.delete("/v1/integrations/gmail", { preHandler: [ctx.requireSession, ctx.requireOrigin] }, async () => {
     let tokens: GmailTokens | null = null;
     try { tokens = getGmailTokens(ctx.db, ctx.config.tokenEncryptionKey); } catch { /* unreadable: just drop */ }
-    if (tokens) { try { await port.revoke(tokens); } catch { /* best effort */ } }
+    // Delete locally first so polling stops at once and a late refresh cannot write back; then revoke the copy.
     disconnectGmail(ctx.db, ctx.now());
+    if (tokens) { try { await port.revoke(tokens); } catch { /* best effort */ } }
     return { data: { disconnected: true } };
   });
 }

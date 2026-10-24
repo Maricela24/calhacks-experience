@@ -43,7 +43,8 @@ export type IngestOutcome =
 /** Demo fixtures are authorized by namespace: fictional `.example` addresses only. */
 export const isDemoSender = (email: string): boolean => /@([^@]+\.)?example$/i.test(email.trim());
 
-function audit(db: Db, reason: string, sourceRef: string, now: Date): void {
+/** Bounded intake audit row: reason + short source ref only, never message content. */
+export function auditIntake(db: Db, reason: string, sourceRef: string, now: Date): void {
   db.prepare("INSERT INTO intake_audit (reason, source_ref, created_at) VALUES (?,?,?)").run(
     reason.slice(0, 200),
     sourceRef.slice(0, 120),
@@ -71,19 +72,19 @@ export function ingestMessage(db: Db, input: IngestInput, now: Date): IngestOutc
 
     if (input.mode === "gmail") {
       if (!settings.automationEnabled) {
-        audit(db, "automation_disabled", safeRef, now);
+        auditIntake(db, "automation_disabled", safeRef, now);
         return { kind: "ignored", reason: "automation_disabled" };
       }
       if (!settings.allowedSenders.map(normalizeEmail).includes(sender)) {
-        audit(db, "sender_not_allowed", safeRef, now);
+        auditIntake(db, "sender_not_allowed", safeRef, now);
         return { kind: "ignored", reason: "sender_not_allowed" };
       }
       if (!settings.autoPrepare) {
-        audit(db, "auto_prepare_disabled", safeRef, now);
+        auditIntake(db, "auto_prepare_disabled", safeRef, now);
         return { kind: "ignored", reason: "auto_prepare_disabled" };
       }
     } else if (!isDemoSender(sender)) {
-      audit(db, "demo_sender_not_fictional", safeRef, now);
+      auditIntake(db, "demo_sender_not_fictional", safeRef, now);
       return { kind: "ignored", reason: "demo_sender_not_fictional" };
     }
 
@@ -105,13 +106,14 @@ export function ingestMessage(db: Db, input: IngestInput, now: Date): IngestOutc
 
     db.prepare(
       `INSERT INTO tasks (id, intake_id, status, revision, title, ingestion_mode, generation_mode, fixture_scenario,
-         sender_name, sender_email, subject, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         sender_name, sender_email, subject, organization_json, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       taskId, intakeId, "queued", 1,
       envelope.subject.trim().slice(0, 200) || "(no subject)",
       input.mode, input.generationMode, input.fixtureScenario,
-      envelope.from.name, sender, envelope.subject, t, t,
+      // Snapshot: generation mode and organization context are fixed at ingestion for every revision.
+      envelope.from.name, sender, envelope.subject, JSON.stringify(settings.organization), t, t,
     );
 
     const ins = db.prepare(
