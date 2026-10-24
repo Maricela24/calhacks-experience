@@ -1,3 +1,5 @@
+> **Batch 7:** this record describes `0e8395e` (Batch 6). The current integration candidate is `ae422e6` on `integration/batch7`; see `docs/batches/batch-7/integration.md`. The engine row below is superseded by Joanne's `engine-batch6`.
+
 # Release candidate record (Darren)
 
 Everything below was observed on this exact candidate. Old hashes, test counts, task ids and artifacts from earlier batches are not evidence for it.

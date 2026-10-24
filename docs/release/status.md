@@ -1,3 +1,5 @@
+> **Batch 7:** the decision below was made on `0e8395e`. It is unchanged in scope for `ae422e6` (same demo scope, same limits); the current candidate and evidence are in `docs/batches/batch-7/integration.md`.
+
 # Final status and limitations (Darren)
 
 **Decision for the demonstrated scope: READY WITH DISCLOSED LIMITATIONS.** The scope is *demo intake → separate worker → real engine in fixture mode → real DOCX/PPTX → review*, on one machine, on candidate `0e8395e`.

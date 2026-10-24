@@ -1,3 +1,5 @@
+> **Batch 7:** rows below describe `0e8395e`. Engine, artifact and QA rows were re-run on `ae422e6` (QA harness 53/53 after four reconciled expectations; manual browser pass; downloads verified). The browser suite is still **NOT RUN**. Details: `docs/batches/batch-7/integration.md`.
+
 # Capability matrix (candidate `0e8395e`)
 
 Status words: **PASS** (observed on this candidate), **FAIL**, **BLOCKED** (external prerequisite missing), **NOT RUN**, **NOT IMPLEMENTED**. Evidence ids: `L#` = row of the check ledger in `docs/release/candidate.md`; `R1`/`R2` = demo rehearsals and `I#` = sections in `docs/batches/batch-6/integration.md`. Independent axes are never merged: accepted ≠ delivered, a controlled clock ≠ an overnight trial, a Dockerfile ≠ deployment, Office ZIP/XML ≠ visual rendering.
