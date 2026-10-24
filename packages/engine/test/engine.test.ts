@@ -230,3 +230,21 @@ describe("a skipped message is not labelled as a proposal (DEF-6)", () => {
     }
   });
 });
+
+describe("answers choosing a different schedule are not contradicted by fixed labels (DEF-3)", () => {
+  it("a three-week scope and schedule never appears next to 'Four-week' headings or table cells", async () => {
+    const answers = [
+      { questionId: "client_identity", answer: "Northstar Co." },
+      { questionId: "project_scope", answer: "Launch positioning and a three-week content plan" },
+      { questionId: "authorized_fee", answer: "USD 4,500" },
+      { questionId: "project_schedule", answer: "November 2-22, 2026 (three weeks)" },
+    ];
+    const resumed = await runWork(await inputFor("ambiguous", { revision: 2, answers }), deps());
+    if (resumed.outcome !== "ready") throw new Error("expected ready");
+    const products = JSON.stringify(resumed.products);
+    expect(products).toContain("three-week");
+    expect(products).not.toMatch(/four-week/i);
+    const docx = Buffer.from(unzip(resumed.files.find((file) => file.format === "docx")!.bytes).get("word/document.xml")!).toString("utf8");
+    expect(docx).not.toMatch(/four-week/i);
+  });
+});
