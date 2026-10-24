@@ -64,4 +64,5 @@ Inspected real screenshots at 1440 px and 390 px of the proposal task, deck fee 
 
 ## Recorded hashes
 
-Filled in by the docs-only commit that follows the implementation hash.
+- Tested candidate (local only): `verify-integration` `f08671a` (my implementation commits there: `528b9e6`, `f08671a`).
+- Pushed branch `experience-batch6`: the same implementation as `b861678` and `4664216` on top of `experience-batch3` `95f325a` (cherry-picked; the platform and engine merges are not part of it), docs `a5964e3`, and the docs-only commit that records these hashes. Typecheck, lint and the web and delivery unit tests (39+16 tests) pass on this pushed branch; the full e2e suite was run only on the local integration candidate above, because this branch alone still has the stub engine and the older platform.
