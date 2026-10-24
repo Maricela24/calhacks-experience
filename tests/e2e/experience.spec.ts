@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
-  BASE, CLI_TOKEN, PASSWORD, downloadFile, expectOfficeZip, inject, login, probeEngine, readZip, statusBadge, taskStatus, xmlText,
+  BASE, CLI_TOKEN, PASSWORD, downloadFile, expectOfficeZip, fillClarifications, inject, login, probeEngine, readZip, statusBadge, taskStatus, xmlText,
 } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
@@ -134,10 +134,9 @@ test("3. ambiguous: answer the questions, get a new revision, and generation res
   await expect(form.getByText("This answer is required.").first()).toBeVisible();
   expect((await taskStatus(page, taskId)).revision).toBe(1);
 
-  const areas = form.locator("textarea");
-  const n = await areas.count();
-  expect(n).toBeGreaterThan(0);
-  for (let i = 0; i < n; i++) await areas.nth(i).fill(`Answer ${i + 1}: Maple & Moss needs a brand refresh and a website content plan.`);
+  expect(await form.locator("textarea").count()).toBeGreaterThan(0);
+  // The engine validates answers (a fee needs an amount and currency), so give real ones.
+  await fillClarifications(form);
   await form.getByRole("button", { name: /Submit answers/ }).click();
   await expect(page.getByText(/Revision 2/).first()).toBeVisible({ timeout: 30_000 });
   await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
@@ -150,7 +149,7 @@ test("3. ambiguous: answer the questions, get a new revision, and generation res
   await expect(activity.getByText("revision 2").first()).toBeVisible();
   await page.getByRole("tab", { name: "Plan", exact: true }).click();
   await expect(page.locator(".details-tabs").getByRole("tabpanel").getByRole("heading", { name: "Your answers" })).toBeVisible();
-  await expect(page.locator(".details-tabs").getByRole("tabpanel")).toContainText("Maple & Moss needs a brand refresh");
+  await expect(page.locator(".details-tabs").getByRole("tabpanel")).toContainText("Brand refresh workshop");
 });
 
 test("4. duplicate replayKey returns one task", async ({ page }) => {
@@ -568,4 +567,71 @@ test("23. a failed download shows an error and never saves a file", async ({ pag
   await page.unroute("**/api/artifacts/*/download");
   const docx = await downloadFile(page, /Retry download of .*\.docx/);
   expectOfficeZip(docx.bytes, "word/document.xml");
+});
+
+test("24. login return: nested task path with a query is restored; a wrong password stays put; a manual login lands on the queue", async ({ browser, page }) => {
+  await login(page);
+  const { taskId } = await inject(page.request, "no_action");
+  const origin = new URL(BASE).origin;
+
+  // Expired session on a deep link with a query string: the whole same-origin path comes back after login.
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  expect((await p.request.post(`${BASE}/api/session`, { headers: { origin, "content-type": "application/json" }, data: { password: PASSWORD } })).ok()).toBe(true);
+  const held = await ctx.cookies();
+  expect((await p.request.delete(`${BASE}/api/session`, { headers: { origin } })).ok()).toBe(true);
+  await ctx.clearCookies();
+  await ctx.addCookies(held);
+  await p.goto(`${BASE}/tasks/${taskId}?from=notification`);
+  await p.waitForURL(/\/login\?returnTo=/);
+  expect(decodeURIComponent(new URL(p.url()).searchParams.get("returnTo") ?? "")).toBe(`/tasks/${taskId}?from=notification`);
+  // A wrong password does not leave the login page or lose the return target.
+  await p.getByLabel("Password").fill("definitely-wrong");
+  await p.getByRole("button", { name: "Sign in" }).click();
+  await expect(p.getByText("Incorrect password.")).toBeVisible();
+  expect(new URL(p.url()).pathname).toBe("/login");
+  expect(decodeURIComponent(new URL(p.url()).searchParams.get("returnTo") ?? "")).toBe(`/tasks/${taskId}?from=notification`);
+  await p.getByLabel("Password").fill(PASSWORD);
+  await p.getByRole("button", { name: "Sign in" }).click();
+  await p.waitForURL(`${BASE}/tasks/${taskId}?from=notification`);
+  await expect(p.getByRole("heading", { level: 1 })).toBeVisible();
+  await ctx.close();
+
+  // Manual login with no return target goes to the queue, never to an external address.
+  const ctx2 = await browser.newContext();
+  const q = await ctx2.newPage();
+  await q.goto(`${BASE}/login`);
+  await q.getByLabel("Password").fill(PASSWORD);
+  await q.getByRole("button", { name: "Sign in" }).click();
+  await q.waitForURL(`${BASE}/`);
+  await ctx2.close();
+
+  // Hostile return targets are ignored (the helper is also unit-tested for the full list).
+  for (const bad of ["//evil.example/x", "/\\evil.example", "javascript:alert(1)", "%2F%2Fevil.example"]) {
+    const c = await browser.newContext();
+    const r = await c.newPage();
+    await r.goto(`${BASE}/login?returnTo=${encodeURIComponent(bad)}`);
+    await expect(r.getByRole("heading", { name: "Private workspace" })).toBeVisible();
+    await c.close();
+  }
+});
+
+test("25. logout revokes the session and the private queue is no longer reachable", async ({ browser }) => {
+  const origin = new URL(BASE).origin;
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  // Own login (not the cached one other tests use), because logout revokes it on the server.
+  expect((await p.request.post(`${BASE}/api/session`, { headers: { origin, "content-type": "application/json" }, data: { password: PASSWORD } })).ok()).toBe(true);
+  await p.goto(`${BASE}/`);
+  await expect(p.getByRole("heading", { name: "Work queue" })).toBeVisible();
+  const held = await ctx.cookies();
+  await p.getByRole("button", { name: "Sign out" }).click();
+  await p.waitForURL(/\/login/);
+  await p.goto(`${BASE}/`);
+  await p.waitForURL(/\/login\?returnTo=/);
+  await expect(p.getByRole("article")).toHaveCount(0);
+  // The old token is dead on the server even if a browser still holds it.
+  await ctx.addCookies(held);
+  expect((await p.request.get(`${BASE}/api/tasks`, { failOnStatusCode: false })).status()).toBe(401);
+  await ctx.close();
 });

@@ -123,3 +123,25 @@ export function probeEngine(page: Page) {
   })();
   return engineProbe;
 }
+
+/** Realistic answers for the engine's stable clarification question ids; the engine validates them (for example a fee needs an amount and a currency). */
+const ANSWERS: Record<string, string> = {
+  client_identity: "Maple & Moss",
+  project_scope: "Brand refresh workshop, website content plan, and a launch checklist",
+  authorized_fee: "USD 6,000",
+  project_schedule: "Start October 26, 2026 for 4 weeks",
+};
+
+/** Fill every clarification textarea (ids look like q-<questionId>) with a valid answer. Returns the answers given. */
+export async function fillClarifications(form: import("@playwright/test").Locator): Promise<string[]> {
+  const areas = form.locator("textarea");
+  const n = await areas.count();
+  const given: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const id = ((await areas.nth(i).getAttribute("id")) ?? "").replace(/^q-/, "");
+    const text = ANSWERS[id] ?? "As described in the request";
+    await areas.nth(i).fill(text);
+    given.push(text);
+  }
+  return given;
+}

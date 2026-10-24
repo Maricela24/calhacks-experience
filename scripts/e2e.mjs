@@ -102,6 +102,17 @@ async function waitFor(url, label, ms = 180_000) {
 
 let code = 1;
 try {
+  // The browser is a prerequisite. If it is missing, say NOT RUN loudly instead of failing obscurely or "passing".
+  const probe = spawnSync(
+    "pnpm",
+    ["--filter", "@afterhours/web", "exec", "node", "-e", "const fs=require('fs');const {chromium}=require('@playwright/test');process.exit(fs.existsSync(chromium.executablePath())?0:4)"],
+    { cwd: root, env, stdio: "ignore" },
+  );
+  if (probe.status !== 0) {
+    console.error("NOT RUN: no Playwright Chromium browser is installed. Install it with:\n  pnpm --filter @afterhours/web exec playwright install chromium\nExit code 4 means the browser suite did not run. It is not a pass.");
+    code = 4;
+    throw new Error("browser missing");
+  }
   for (const step of ["db:migrate", "db:seed"]) {
     const r = spawnSync("pnpm", [step], { cwd: root, env, stdio: "pipe" });
     if (r.status !== 0) throw new Error(`pnpm ${step} failed:\n${r.stdout}${r.stderr}`);
