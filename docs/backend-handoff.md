@@ -233,3 +233,41 @@ snapshot and fall back to current settings.
 Tests: `packages/data/test/batch4.test.ts` (17), `apps/api/test/batch4.test.ts` (15), `apps/worker/test/batch4.test.ts`
 (15). Google, the engine and the delivery adapter are mocks in these tests, except that the consent URL is built by the
 real `google-auth-library`. Not proven: a live Google account, a live model call, a live WhatsApp send.
+
+## Batch 5 platform: durability, quiet hours, one-host runtime (branch `platform-batch5`)
+
+Migration `003_batch5_durability.sql` adds `notification_members` (UNIQUE per task revision and channel),
+`notifications.kind/sealed_at/submit_started_at/recipient_fp`, and backfills existing rows. It applies to existing
+databases (tested on a database built from migrations 001–002). No public DTO, route, state name or env var changed.
+
+**For Joanne (engine boundary)**
+- `GeneratedFile.id` is ignored apart from "must be nonempty": the platform derives `art_<hash>` itself (Batch 4) and
+  now stores each file at `<task>/r<rev>/<artifactId>.<sha256[:16]>.<format>`, never overwriting. Do not depend on paths.
+- Honour `deps.signal`. If it is ignored the worker stops waiting at the deadline (240 s) or on a lost lease, records the
+  outcome and discards any late `onProgress`/result, but the engine's own work keeps running in the background.
+- A progress call after the worker lost ownership throws `LeaseLostError`; treat it as cancellation.
+
+**For Maricella (UI and delivery)**
+- Schedule policy: `docs/runbook.md` → "Notifications and quiet hours". `NotificationRecord.scheduledFor` is the *current*
+  plan: a queued row can move later if dispatch lands in quiet hours (late worker start, edited settings). Do not present it
+  as a promise.
+- More than one digest can exist for a local date (a result arrives after a digest was claimed). Digests list their tasks
+  in `taskIds`; render the bounded list plus remainder count in `composeNotification`.
+- `blocked` with `lastError` starting `POLICY_CHANGED:` means the channel or recipient was edited after queueing; show it
+  as "not sent" with the safe reason. `failed` with `DELIVERY_UNCERTAIN` means the provider may have accepted; show that
+  honestly and do not offer an automatic resend.
+- `PATCH /api/settings` now returns 400 for an unknown IANA zone (offset forms such as `UTC+3` are rejected), a non-`HH:mm`
+  time, and an enabled quiet window whose start equals its end. Show the `error.message`.
+- The delivery adapter must time out well under the 60 s notification lease and must throw `DELIVERY_UNCERTAIN`
+  (`retryable=false`) when a timeout happens after the request was sent.
+- After a session expires the login page lands on `/`, not on the deep link that was opened (spec: continue to the task).
+
+**Platform exports added** (`@afterhours/data`): `computeDeliverySchedule`, `parseHHmm`, `isValidIanaZone`, `ScheduleError`,
+`stageArtifactFiles`, `promoteStagedFiles`, `verifyStoredFiles`, `cleanOrphanArtifacts`, `jobStillOwned`, `markSubmitStarted`,
+`stalePolicyProblem`, `recipientFingerprint`, `UNCERTAIN_MESSAGE`, `createBackup`, `verifyBackup`, `restoreBackup`.
+Worker: `installShutdownHandlers`, `WorkerDeps.testHooks` (internal fault seams; never wired to a route or `main.ts`).
+New scripts: `pnpm backup -- create|verify|restore`, `pnpm check:worker`.
+
+Tests: `packages/data/test/batch5-{schedule,notifications,artifacts,backup}.test.ts`, `apps/worker/test/batch5.test.ts`
+(includes real child-process SIGKILL/SIGTERM drills), `apps/api/test/batch5.test.ts`. Evidence and unrun items:
+`docs/batches/batch-5/darren.md`, `docs/batches/batch-5/integration.md`.

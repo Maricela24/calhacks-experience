@@ -7,6 +7,7 @@ import path from "node:path";
 
 const [cmd, a, b] = process.argv.slice(2).filter((x) => x !== "--");
 const fail = (m: string): never => { console.error(m); process.exit(1); };
+process.on("uncaughtException", (e) => fail(`backup failed: ${e instanceof Error ? e.message : "unknown error"}`));
 
 if (cmd === "create") {
   if (!a) fail("usage: backup create <outDir>");

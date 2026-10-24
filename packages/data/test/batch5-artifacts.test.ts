@@ -154,8 +154,9 @@ describe("publication boundaries: a partial set is never visible as ready", () =
     verifyStoredFiles(root, stored);
     commitEngineResult(db, { taskId, revision: 1, ownerToken: a.ownerToken, now: T0, outcome: "ready", plan: r.plan, sources: r.sources, products: r.products, warnings: [], files: stored });
     const m = manifest(db, taskId);
-    expect(m.map((x) => ({ rel_path: x.rel_path, sha256: x.sha256, size_bytes: x.size_bytes }))).toEqual(
-      stored.map((s) => ({ rel_path: s.relPath, sha256: s.sha256, size_bytes: s.sizeBytes })));
+    const byPath = <T extends { rel_path: string }>(a: T, b: T) => a.rel_path.localeCompare(b.rel_path);
+    expect(m.map((x) => ({ rel_path: x.rel_path, sha256: x.sha256, size_bytes: x.size_bytes })).sort(byPath)).toEqual(
+      stored.map((s) => ({ rel_path: s.relPath, sha256: s.sha256, size_bytes: s.sizeBytes })).sort(byPath));
   });
 });
 

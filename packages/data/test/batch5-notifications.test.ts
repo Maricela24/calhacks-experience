@@ -215,6 +215,22 @@ describe("settings edits after queueing never reroute or resurrect a live messag
   });
 });
 
+describe("an unusable stored schedule never fails the ready commit", () => {
+  it("falls back to an immediate notification with a warning event", () => {
+    const { db, config } = makeTestDb();
+    // Bypasses patchSettings validation on purpose: a value that is already stored and no longer usable.
+    const cur = JSON.parse((db.prepare("SELECT settings_json FROM workspace_settings").get() as { settings_json: string }).settings_json);
+    cur.notifications.quietHours = { enabled: true, start: "22:00", end: "08:00", timezone: "Nope/Zone" };
+    db.prepare("UPDATE workspace_settings SET settings_json=?").run(JSON.stringify(cur));
+    const { taskId } = runToReady(db, config, "bad-zone", T("2026-10-24T06:30:00Z"));
+    expect(db.prepare("SELECT status FROM tasks WHERE id=?").get(taskId)).toEqual({ status: "ready" });
+    expect(rows(db)).toHaveLength(1);
+    expect(rows(db)[0]).toMatchObject({ kind: "immediate", state: "queued" });
+    const warn = db.prepare("SELECT message FROM task_events WHERE task_id=? AND type='warning' AND stage='notify'").all(taskId) as Array<{ message: string }>;
+    expect(warn.some((w) => /could not be computed/.test(w.message))).toBe(true);
+  });
+});
+
 describe("provider submission bookkeeping", () => {
   const setup = () => {
     const ctx = makeTestDb();
