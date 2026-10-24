@@ -16,6 +16,15 @@ Last executed locally on 2026-10-23: 15 focused tests passed and the package typ
 | relative deadline | deterministic UTC instant | Uses `email.receivedAt` plus `organization.timezone`, not worker run or ingestion time |
 | live without credentials | typed failure | `MODEL_CONFIGURATION`, nonretryable, no fixture fallback |
 
+## Batch 6 final audit (2026-10-24, `engine-batch6` @ `6dde883`)
+
+These are the authenticated downloads from the real API and worker on an audit-only merge with `platform-batch5` @ `d11127b`. Details are in `docs/release/artifact-audit.md`.
+- **Content:** proposal, report, clarification (r1 → r2) and no-action behaved as expected. Six of six downloads match the manifest size and SHA-256 and the preview products, and all citations and quotes are valid.
+- **Rendering:** the proposal, report and Northstar decks were rendered in Microsoft PowerPoint. Word rendering: NOT RUN.
+- **Fixed P1:** reports on changed CSVs failed their own rounded-percentage check (`4f660d2`). The spec variation and a 60-input sweep now pass.
+- **Fixed P2:** unchanged metrics read "$100 to $100" (`6dde883`).
+- **Tests:** 46 engine tests; 263 across the merged tree.
+
 ## Batch 5 (2026-10-24, branch `engine-batch5`)
 
 43 engine tests and 117 repository tests passed. All six current decks (proposal, report, long, hostile, changed CSV, eight-channel) were exported through **Microsoft PowerPoint** and every slide was inspected. Ten layout and wording defects were found and fixed, then re-rendered. Word page rendering was **not run**: Word opened the files, but scripted export failed with AppleEvent -1708. DOCX page 1 was checked only in macOS Quick Look, which is not Word.

@@ -17,7 +17,7 @@ Deadline interpretation uses the immutable `email.receivedAt` and `organization.
 
 Fixture proposal facts are extracted from the supplied email, brief, and organization profile with exact quotes as evidence. A changed client is reflected when the sources agree. Stable `needs_input` question IDs: `proposal_client_conflict`, `proposal_client_length`, `proposal_fee_conflict` (also missing or mixed-currency fees), `proposal_schedule_conflict`, `proposal_start_conflict`, `proposal_deadline_conflict`, `proposal_deadline_past`, `proposal_scope_missing`. A brief that itemizes deliverables wins over the company's standard package, which applies only when a source invokes it. Clarification answers that are too long, or a fee answer without amount and currency, are asked again.
 
-Report wording is derived from the calculated numbers (increase/decrease/unchanged, ties, month names). Every number in report content must be a calculated metric or a source value, and every amount or percentage in any product must appear in a source.
+Percent changes are computed to 2 decimals and displayed to 1 by `displayPercent`; the verifier accepts exactly those forms. Report wording is derived from the calculated numbers (increase/decrease/unchanged, ties, month names). Every number in report content must be a calculated metric or a source value, and every amount or percentage in any product must appear in a source.
 
 ## Modes and environment
 
@@ -41,6 +41,8 @@ Plain text, Markdown, and CSV are extracted with five-file, 10 MB/file, 20 MB ag
 Render `WorkProduct.blocks` for documents and `WorkProduct.slides` for decks, labeled **Content preview**. Evidence references point to `TaskDetail.sources` by opaque ID. Do not create separate preview copy or imply pixel-identical Office rendering. `basis` distinguishes sourced, calculated, recommendation, and assumption content, and the exported files show it too: DOCX basis lines under each heading, PPTX RECOMMENDATION/ASSUMPTION tags and a per-slide basis line.
 
 ## Verification
+
+Final Batch 6 artifact audit, with the engine capability table and claims to avoid: `docs/release/artifact-audit.md`.
 
 Batch 5 evidence and rendering limits: `docs/batches/batch-5/joanne.md`. Reusable synthetic inputs: `fixtures/synthetic/*` and `packages/engine/test/synthetic.ts`. Current outputs: `corepack pnpm exec tsx packages/engine/test/render-samples.ts` (writes to ignored `var/engine-samples`).
 
