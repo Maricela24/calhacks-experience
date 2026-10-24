@@ -38,7 +38,7 @@ export async function renderPptx(product: WorkProduct, organization: Organizatio
         if (block.kind === "chart" && block.chart) {
           slide.addChart(pptx.ChartType.bar, block.chart.series.map((series) => ({ name: series.name, labels: block.chart!.labels, values: series.values })), { x, y: PAGE.y + 0.5, w: columnWidth, h: 3.9, showLegend: false, showTitle: false, showValue: true, catAxisLabelFontSize: 13, valAxisLabelFontSize: 12, valAxisMinVal: 0, chartColors: [hex(organization.brand.accentColor)] });
         } else {
-          slide.addText(blockText(block), { x, y: PAGE.y + (block.heading ? 0.5 : 0), w: columnWidth, h: PAGE.h - (block.heading ? 0.5 : 0), fontFace: organization.brand.fontFamily, fontSize: content.layout === "title" ? 24 : 20, color: "334E68", margin: 0.08, breakLine: false, valign: content.layout === "title" ? "middle" : "top", fit: "shrink", paraSpaceAfter: 10, bullet: block.kind === "bullets" ? { type: "bullet" } : undefined });
+          slide.addText(blockText(block), { x, y: PAGE.y + (block.heading ? 0.5 : 0), w: columnWidth, h: PAGE.h - (block.heading ? 0.5 : 0), fontFace: organization.brand.fontFamily, fontSize: content.layout === "title" ? 24 : content.layout === "two_column" ? 18 : 20, color: "334E68", margin: 0.08, breakLine: false, valign: content.layout === "title" ? "middle" : "top", fit: "shrink", paraSpaceAfter: 10, bullet: block.kind === "bullets" ? { type: "bullet" } : undefined });
         }
       });
       slide.addNotes(content.speakerNotes);

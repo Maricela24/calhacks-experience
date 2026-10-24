@@ -1,4 +1,5 @@
 import type { EngineInput, OutputKind, SourceDocument, WorkPlan, WorkQuestion } from "@afterhours/contracts";
+import { resolveDeadline } from "./dates";
 
 const AMBIGUOUS_QUESTIONS: WorkQuestion[] = [
   { id: "client_identity", question: "Which client is this proposal for?", reason: "The client identity is needed to tailor and label the deliverables.", required: true },
@@ -24,12 +25,13 @@ export function makePlan(input: EngineInput, sources: SourceDocument[], classifi
   const answered = new Set(input.answers.filter((answer) => answer.answer.trim()).map((answer) => answer.questionId));
   const questions = classification === "ambiguous" ? AMBIGUOUS_QUESTIONS.filter((question) => !answered.has(question.id)) : [];
   const requestedOutputs: OutputKind[] = classification === "report" ? ["report", "presentation"] : classification === "proposal" || classification === "ambiguous" ? ["proposal", "presentation"] : [];
-  const dueAt = classification === "proposal" && input.email.bodyText.includes("October 26, 2026") ? "2026-10-26T16:00:00.000Z" : null;
+  const deadline = classification === "proposal" ? resolveDeadline(input.email.bodyText, input.email.receivedAt, input.organization.timezone) : null;
+  const client = input.email.subject.match(/\bfor\s+(.+?)\s*$/i)?.[1] ?? "Client";
   return {
-    title: classification === "report" ? "January-February sales performance update" : classification === "ambiguous" ? "Client proposal and short deck" : "Maple & Moss launch strategy proposal",
+    title: classification === "report" ? "January-February sales performance update" : classification === "ambiguous" ? "Client proposal and short deck" : `${client} launch strategy proposal`,
     requestSummary: classification === "report" ? "Prepare a short sales report and five-slide update using only the attached CSV." : classification === "ambiguous" ? "Prepare a client proposal and short presentation after material details are supplied." : "Prepare a review-draft proposal and five-slide kickoff deck for the stated launch strategy engagement.",
-    requestedOutputs, dueAt,
-    dueAtExplanation: dueAt ? "Draft deadline stated in the email: Monday, October 26, 2026 at 9:00 AM America/Los_Angeles. This is separate from the engagement completion date." : null,
+    requestedOutputs, dueAt: deadline?.dueAt ?? null,
+    dueAtExplanation: deadline?.explanation ?? null,
     steps: ["Extract and normalize authorized sources", "Resolve material unknowns", "Generate grounded structured content", "Verify evidence and calculations", "Export matching Office files"],
     assumptions: classification === "report" ? ["USD amounts are reported exactly as supplied; causal explanations are out of scope."] : ["Any audience segments are working hypotheses, not established demographic facts.", "The deliverables are review drafts and have not been sent or accepted."],
     questions,

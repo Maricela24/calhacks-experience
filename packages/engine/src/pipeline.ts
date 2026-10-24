@@ -9,6 +9,7 @@ import { generateWithOpenAI } from "./providers/openai";
 import { renderDocx } from "./render/docx";
 import { renderPptx } from "./render/pptx";
 import { buildSources } from "./sources";
+import { extractProposalFacts } from "./proposalFacts";
 
 const missingQuestion = (id: string, question: string, reason: string): WorkQuestion => ({ id, question, reason, required: true });
 
@@ -65,7 +66,12 @@ export async function execute(inputValue: EngineInput, deps: EngineDependencies)
         plan.questions = [question];
         return { outcome: "needs_input", plan, sources, questions: [question], warnings: [...warnings, ...needed.warnings] };
       }
-      products = proposalProducts(input, sources, plan);
+      const facts = extractProposalFacts(input, sources);
+      if (facts.questions.length) {
+        plan.questions = facts.questions;
+        return { outcome: "needs_input", plan, sources, questions: facts.questions, warnings };
+      }
+      products = proposalProducts(input, sources, plan, false, facts);
     } else {
       const csvSource = sources.find((source) => source.kind === "attachment" && (source.mimeType === "text/csv" || source.filename?.endsWith(".csv")));
       if (!csvSource || csvSource.extractionStatus !== "complete") {

@@ -13,6 +13,10 @@ const result = await runWork({
 
 Fixture paths are `fixtures/scenarios/*.json`, `fixtures/organization/harbor-creative.json`, and `fixtures/attachments/*`. Proposal/report fixtures return one DOCX and one five-slide PPTX. Ambiguous work returns four stable questions until answered. No-action work returns `skipped` with no files.
 
+Deadline interpretation uses the immutable `email.receivedAt` and `organization.timezone`. It never uses `input.now`, because that is worker execution time and the task's `createdAt` is ingestion time. Absolute deadlines and supported relative phrases such as “next Monday at 9 AM” are normalized to UTC; the explanation records the basis. Engagement dates remain separate from draft deadlines.
+
+Fixture proposal facts are extracted from the supplied email, brief, and organization profile. A changed client is reflected when the sources agree. Conflicting client names, fees, or engagement durations return stable `needs_input` questions instead of silently preferring a fixture constant.
+
 ## Modes and environment
 
 - `fixture`: deterministic local planning/content, real CSV calculation, validation, and real Office bytes; no network.
@@ -31,4 +35,4 @@ Render `WorkProduct.blocks` for documents and `WorkProduct.slides` for decks, la
 
 ## Verification
 
-The package tests cover fixture calculations, changed inputs, zero denominators, blank values, no-action, clarification/resume, deterministic IDs, five-slide output, ZIP signatures, and fail-closed live configuration. Visual Office rendering is not guaranteed unless the generated artifacts are opened or rendered in an Office-compatible application.
+The package tests cover fixture calculations, changed inputs, material source conflicts, timezone-relative deadlines, zero denominators, blank values, cancellation, no-action, clarification/resume, deterministic IDs, five-slide output, ZIP signatures, and fail-closed live configuration. Visual Office rendering is not guaranteed unless the generated artifacts are opened or rendered in an Office-compatible application.

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { inflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import type { DemoFixture, EngineInput, OrganizationProfile } from "@afterhours/contracts";
-import { calculateSales, EngineError, runWork } from "../src/index";
+import { calculateSales, EngineError, resolveDeadline, runWork } from "../src/index";
 
 const root = resolve(import.meta.dirname, "../../..");
 const loadJson = async <T>(path: string): Promise<T> => JSON.parse(await readFile(resolve(root, path), "utf8")) as T;
@@ -72,6 +72,12 @@ describe("sales calculations", () => {
 });
 
 describe("fixture pipeline", () => {
+  it("resolves relative deadlines from receivedAt in the organization timezone, never run time", () => {
+    const deadline = resolveDeadline("Please send this by next Monday at 9 AM.", "2026-10-23T19:00:00.000Z", "America/Los_Angeles");
+    expect(deadline?.dueAt).toBe("2026-10-26T16:00:00.000Z");
+    expect(deadline?.explanation).toContain("email.receivedAt");
+  });
+
   it("skips an informational message without files", async () => {
     const result = await runWork(await inputFor("no_action"), deps());
     expect(result.outcome).toBe("skipped");
@@ -106,6 +112,39 @@ describe("fixture pipeline", () => {
       await Promise.all(result.files.map((file) => writeFile(resolve(process.env.ENGINE_RENDER_DIR!, file.filename), file.bytes)));
     }
   }, 20_000);
+
+  it("derives the client from the actual email and brief instead of a fixture constant", async () => {
+    const changed = await inputFor("proposal");
+    changed.email.subject = changed.email.subject.replace("Maple & Moss", "Cedar & Sage");
+    const text = new TextDecoder().decode(changed.attachments[0]!.bytes).replaceAll("Maple & Moss", "Cedar & Sage");
+    changed.attachments[0] = { ...changed.attachments[0]!, bytes: new TextEncoder().encode(text) };
+    const result = await runWork(changed, deps());
+    expect(result.outcome).toBe("ready");
+    if (result.outcome === "ready") {
+      expect(JSON.stringify(result.products)).toContain("Cedar & Sage");
+      expect(JSON.stringify(result.products)).not.toContain("Maple & Moss");
+    }
+  });
+
+  it("surfaces a material fee conflict instead of inventing or silently choosing", async () => {
+    const changed = await inputFor("proposal");
+    const text = new TextDecoder().decode(changed.attachments[0]!.bytes).replace("USD 6,000", "USD 7,000");
+    changed.attachments[0] = { ...changed.attachments[0]!, bytes: new TextEncoder().encode(text) };
+    const result = await runWork(changed, deps());
+    expect(result.outcome).toBe("needs_input");
+    if (result.outcome === "needs_input") {
+      expect(result.questions).toContainEqual(expect.objectContaining({ id: "proposal_fee_conflict" }));
+      expect(result.questions[0]?.reason).toContain("USD 6,000");
+      expect(result.questions[0]?.reason).toContain("USD 7,000");
+    }
+  });
+
+  it("honors an already-aborted worker signal", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(runWork(await inputFor("proposal"), { onProgress: async () => undefined, signal: controller.signal }))
+      .rejects.toMatchObject({ code: "ENGINE_ABORTED", retryable: true });
+  });
 
   it("keeps report preview, chart, and exported files on calculated values", async () => {
     const result = await runWork(await inputFor("report"), deps());

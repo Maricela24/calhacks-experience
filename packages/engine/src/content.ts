@@ -2,6 +2,7 @@ import type { ContentBlock, EngineInput, SlideContent, SourceDocument, SourceRef
 import type { SalesMetrics } from "./calculations";
 import { usd } from "./calculations";
 import { stableId } from "./ids";
+import type { ProposalFacts } from "./proposalFacts";
 
 const empty = { items: [] as string[], columns: [] as string[], rows: [] as string[][], chart: null };
 const sourceByKind = (sources: SourceDocument[], kind: SourceDocument["kind"]) => sources.find((source) => source.kind === kind)!;
@@ -22,18 +23,18 @@ function slide(id: string, title: string, layout: SlideContent["layout"], blocks
   return { id, title, layout, blocks, speakerNotes };
 }
 
-export function proposalProducts(input: EngineInput, sources: SourceDocument[], plan: WorkPlan, fromAnswers = false): WorkProduct[] {
+export function proposalProducts(input: EngineInput, sources: SourceDocument[], plan: WorkPlan, fromAnswers = false, extracted?: ProposalFacts): WorkProduct[] {
   const email = sourceByKind(sources, "email");
   const org = sourceByKind(sources, "organization");
   const brief = attachment(sources, ".md");
   const answers = Object.fromEntries(input.answers.map((answer) => [answer.questionId, answer.answer.trim()]));
-  const client = fromAnswers ? (answers.client_identity ?? "Client") : "Maple & Moss";
-  const scope = fromAnswers ? (answers.project_scope ?? "Scope to be confirmed") : "a four-week launch strategy covering discovery, audience and message strategy, a content calendar, and measurement planning";
-  const fee = fromAnswers ? (answers.authorized_fee ?? "Fee to be confirmed") : "USD 6,000";
-  const schedule = fromAnswers ? (answers.project_schedule ?? "Schedule to be confirmed") : "October 26-November 22, 2026 (four calendar weeks)";
-  const emailEvidence = [ref(email, fromAnswers ? input.email.bodyText : "The engagement would start October 26 and run for four weeks.")];
-  const briefEvidence = brief ? [ref(brief, fromAnswers ? null : "Maple & Moss is a fictional local refillable personal-care brand preparing a local launch.")] : [];
-  const orgEvidence = [ref(org, fromAnswers ? null : "The standard four-week launch strategy package costs USD 6,000")];
+  const client = fromAnswers ? (answers.client_identity ?? "Client") : extracted!.client;
+  const scope = fromAnswers ? (answers.project_scope ?? "Scope to be confirmed") : extracted!.scope;
+  const fee = fromAnswers ? (answers.authorized_fee ?? "Fee to be confirmed") : extracted!.fee;
+  const schedule = fromAnswers ? (answers.project_schedule ?? "Schedule to be confirmed") : extracted!.schedule;
+  const emailEvidence = [ref(email, fromAnswers ? input.email.bodyText : null)];
+  const briefEvidence = brief ? [ref(brief, null)] : [];
+  const orgEvidence = [ref(org, null)];
   const answerEvidence = (id: string) => {
     const source = sources.find((item) => item.kind === "user_answer" && item.title.endsWith(id));
     return source ? [ref(source, source.text)] : [];
