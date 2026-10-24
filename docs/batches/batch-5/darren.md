@@ -1,7 +1,7 @@
 # Batch 5 — Darren (platform: durable overnight operation and recovery)
 
 - **Branch:** `platform-batch5`, created from local `platform-batch4` @ `af24fef` (three commits ahead of `origin/platform-batch4` @ `700d7a6`; `platform` and `main` untouched, nothing merged anywhere).
-- **Candidate:** implementation commits `0af9ff3` (fenced publication, scheduling, notification membership/bookkeeping, worker) and `56977d6` (backup/restore, worker health probe, compose). Tests/docs commit follows (its hash is recorded in `integration.md`).
+- **Candidate:** implementation commits `0af9ff3` (fenced publication, scheduling, notification membership/bookkeeping, worker) and `56977d6` (backup/restore, worker health probe, compose). Tests, runbook and these reports are in `9bfd28b`; every result below was produced on the tree that became `9bfd28b` (this line and the next commit only record it).
 - **Team branches seen on origin today:** `main` `5d8f342`, `platform` `aaed3db`, `platform-batch4` `700d7a6`, `person-2-engine` `de6bd40`. No `engine-batch5`, no experience branch, no Maricella branch.
 - **Credentials:** the test environment was built from scratch with fixture mode and the outbox. No Google, OpenAI/model or Twilio value existed anywhere in it, so every live check is **BLOCKED**, not failed.
 - **Tools missing here:** Docker is not installed (`docker: command not found`), so every container check is **NOT RUN**.
