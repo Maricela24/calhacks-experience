@@ -74,6 +74,22 @@ describe("OAuth start", () => {
     expect(r.body).not.toContain(GOOGLE.GOOGLE_CLIENT_SECRET);
   });
 
+  it("a browser clicking Connect is sent back to Settings with a safe marker instead of a JSON error page", async () => {
+    const html = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+    await setup();
+    let cookie = await login();
+    let r = await app.inject({ method: "GET", url: "/v1/integrations/gmail/start", headers: { cookie, accept: html } });
+    expect([r.statusCode, r.headers.location]).toEqual([302, "/settings?gmail=error&reason=not_configured"]);
+    await app.close();
+    await setup({ ...GOOGLE, GOOGLE_REDIRECT_URI: "http://127.0.0.1:4177/v1/integrations/gmail/callback" });
+    cookie = await login();
+    r = await app.inject({ method: "GET", url: "/v1/integrations/gmail/start", headers: { cookie, accept: html } });
+    expect([r.statusCode, r.headers.location]).toEqual([302, "/settings?gmail=error&reason=redirect_mismatch"]);
+    // Without a session a browser still gets 401, never a redirect that hints at configuration.
+    r = await app.inject({ method: "GET", url: "/v1/integrations/gmail/start", headers: { accept: html } });
+    expect(r.statusCode).toBe(401);
+  });
+
   it("local 4177 override stays consistent: callback follows PUBLIC_APP_URL, not the private API port", async () => {
     await setup({ ...GOOGLE, API_PORT: "4177", API_ORIGIN: "http://127.0.0.1:4177" });
     const cookie = await login();

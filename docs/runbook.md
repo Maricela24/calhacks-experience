@@ -29,7 +29,7 @@ pnpm dev
    `GOOGLE_REDIRECT_URI`, and `GOOGLE_REDIRECT_URI` must be exactly `PUBLIC_APP_URL` + `/api/integrations/gmail/callback`
    (local default `http://localhost:3000/api/integrations/gmail/callback`). It is the **browser-facing web origin**,
    never the private API port (4000/4177): the session cookie lives on the web origin and the Next proxy forwards
-   `/api/*` to the API. A mismatch makes `pnpm check:ready` FAIL and Connect return `503 GMAIL_REDIRECT_MISMATCH`.
+   `/api/*` to the API. A mismatch makes `pnpm check:ready` FAIL and Connect return `503 GMAIL_REDIRECT_MISMATCH` (a browser is sent back to `/settings?gmail=error&reason=redirect_mismatch`).
 4. Put `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `.env`. Restart API and worker.
 5. In the app: Settings → add the test sender to **allowed senders** (exact address) → Connect Gmail.
 6. Send a new email from the allowed sender to the test inbox. The worker polls every
@@ -64,7 +64,7 @@ users can connect. A successful test connection is **not** Google production ver
 | `/settings?gmail=error&reason=session` or `invalid_state` | Start Connect again from the same logged-in browser tab within 10 minutes. |
 | `reason=no_refresh_token` | Remove the app at myaccount.google.com/permissions, then reconnect (consent is forced). |
 | Status `error`: "Reconnect Gmail in Settings" | Token revoked/expired (Testing tokens expire ~7 days). Disconnect and reconnect. Task history is kept. |
-| `503 GMAIL_NOT_CONFIGURED` | Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. |
+| `503 GMAIL_NOT_CONFIGURED` (browser: `/settings?gmail=error&reason=not_configured`) | Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. |
 | `503 GMAIL_REDIRECT_MISMATCH` | Set `GOOGLE_REDIRECT_URI` to `PUBLIC_APP_URL` + `/api/integrations/gmail/callback`, and register that exact URI in Google Cloud. |
 | `reason=scope` | The Gmail read permission was unticked on Google's consent screen. Connect again and allow it. |
 | `reason=expired` | More than 10 minutes passed between Connect and the callback. Start again. |

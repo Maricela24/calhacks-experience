@@ -39,12 +39,19 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Ctx, inject
   }));
 
   app.get("/v1/integrations/gmail/start", { preHandler: ctx.requireSession }, async (req, reply) => {
+    // Connect is a top-level browser navigation: send a browser back to Settings with a safe marker
+    // instead of leaving it on a raw JSON error page. API clients still get the 503 error body.
+    const browser = /text\/html/.test(String(req.headers.accept ?? ""));
     if (!ctx.config.google.clientId || !ctx.config.google.clientSecret) {
+      if (browser) return reply.redirect(back("error&reason=not_configured"));
       throw new DomainError("GMAIL_NOT_CONFIGURED", "Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.", 503);
     }
     // A callback on any origin other than PUBLIC_APP_URL cannot carry the session cookie, so refuse early.
     const redirectProblem = oauthRedirectProblem(ctx.config);
-    if (redirectProblem) throw new DomainError("GMAIL_REDIRECT_MISMATCH", redirectProblem, 503);
+    if (redirectProblem) {
+      if (browser) return reply.redirect(back("error&reason=redirect_mismatch"));
+      throw new DomainError("GMAIL_REDIRECT_MISMATCH", redirectProblem, 503);
+    }
     let url: string;
     const state = createOauthState(ctx.db, req.sessionId!, ctx.now());
     try {
