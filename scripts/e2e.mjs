@@ -2,7 +2,7 @@
 // (never the working database), runs the Playwright suite in tests/e2e, then cleans up.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -33,6 +33,7 @@ const env = {
   GOOGLE_CLIENT_ID: "",
   GOOGLE_CLIENT_SECRET: "",
   WHATSAPP_USE_CASE_ELIGIBLE: "false",
+  E2E_JSON: path.join(tmp, "results.json"),
   E2E_BASE_URL: `http://localhost:${WEB_PORT}`,
   E2E_PASSWORD: password,
   E2E_CLI_TOKEN: cliToken,
@@ -90,6 +91,24 @@ try {
     { cwd: root, env, stdio: "inherit" },
   );
   code = run.status ?? 1;
+  // A skipped test is a BLOCKED prerequisite (for example the stub engine), never a pass.
+  try {
+    const report = JSON.parse(readFileSync(path.join(tmp, "results.json"), "utf8"));
+    const blocked = [];
+    const walk = (suite) => {
+      for (const spec of suite.specs ?? []) {
+        for (const t of spec.tests ?? []) {
+          if ((t.annotations ?? []).some((a) => String(a.description ?? "").startsWith("BLOCKED"))) blocked.push(spec.title);
+        }
+      }
+      for (const child of suite.suites ?? []) walk(child);
+    };
+    for (const suite of report.suites ?? []) walk(suite);
+    if (code === 0 && blocked.length > 0) {
+      console.error(`\nBLOCKED: ${blocked.length} test(s) could not run because a prerequisite is missing (the real engine). This is not a pass. Exit code 3.`);
+      code = 3;
+    }
+  } catch { /* no report written; keep Playwright's exit code */ }
 } catch (e) {
   console.error(e instanceof Error ? e.message : e);
 } finally {

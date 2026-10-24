@@ -1,5 +1,6 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { inflateRawSync } from "node:zlib";
 
 export const PASSWORD = process.env.E2E_PASSWORD ?? "";
 export const CLI_TOKEN = process.env.E2E_CLI_TOKEN ?? "";
@@ -60,4 +61,62 @@ export function expectOfficeZip(bytes: Buffer, entry: string) {
   const text = bytes.toString("latin1");
   expect(text).toContain("[Content_Types].xml");
   expect(text).toContain(entry);
+}
+
+/** Minimal ZIP reader (stored and deflated entries) so tests can inspect what the browser really downloaded. */
+export function readZip(bytes: Buffer): Map<string, Buffer> {
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0; i--) {
+    if (bytes.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  expect(eocd, "ZIP end-of-central-directory record").toBeGreaterThanOrEqual(0);
+  const count = bytes.readUInt16LE(eocd + 10);
+  let p = bytes.readUInt32LE(eocd + 16);
+  const out = new Map<string, Buffer>();
+  for (let n = 0; n < count; n++) {
+    expect(bytes.readUInt32LE(p)).toBe(0x02014b50);
+    const method = bytes.readUInt16LE(p + 10);
+    const compSize = bytes.readUInt32LE(p + 20);
+    const nameLen = bytes.readUInt16LE(p + 28);
+    const extraLen = bytes.readUInt16LE(p + 30);
+    const commentLen = bytes.readUInt16LE(p + 32);
+    const local = bytes.readUInt32LE(p + 42);
+    const name = bytes.subarray(p + 46, p + 46 + nameLen).toString("utf8");
+    const dataStart = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
+    const raw = bytes.subarray(dataStart, dataStart + compSize);
+    out.set(name, method === 8 ? inflateRawSync(raw) : Buffer.from(raw));
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+
+/** Visible text of an OOXML part: tags removed, entities decoded. */
+export function xmlText(part: Buffer | undefined): string {
+  return (part?.toString("utf8") ?? "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+}
+
+let engineProbe: Promise<{ real: boolean; detail: string }> | null = null;
+
+/**
+ * The engine is Joanne's package. While it is the foundation stub, every task fails with ENGINE_NOT_IMPLEMENTED and
+ * no ready result can exist. Tests that need generated work call this and are skipped (BLOCKED), never faked.
+ */
+export function probeEngine(page: Page) {
+  engineProbe ??= (async () => {
+    const { taskId } = await inject(page.request, "proposal", `e2e-probe-${Date.now()}`);
+    for (let i = 0; i < 90; i++) {
+      const res = await page.request.get(`${BASE}/api/tasks/${taskId}`);
+      const body = (await res.json()) as { data: { task: { status: string; error: { code: string } | null } } };
+      const t = body.data.task;
+      if (t.status === "failed") {
+        return { real: t.error?.code !== "ENGINE_NOT_IMPLEMENTED", detail: `probe task ${taskId} failed with ${t.error?.code}` };
+      }
+      if (["ready", "needs_input", "skipped", "approved"].includes(t.status)) return { real: true, detail: `probe task ${taskId} reached ${t.status}` };
+      await page.waitForTimeout(1000);
+    }
+    return { real: false, detail: `probe task ${taskId} never finished` };
+  })();
+  return engineProbe;
 }

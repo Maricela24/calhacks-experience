@@ -1,27 +1,58 @@
-import { expect, test } from "@playwright/test";
-import { BASE, CLI_TOKEN, PASSWORD, downloadFile, expectOfficeZip, inject, login, statusBadge, taskStatus } from "./helpers";
+import { expect, test, type Page } from "@playwright/test";
+import {
+  BASE, CLI_TOKEN, PASSWORD, downloadFile, expectOfficeZip, inject, login, probeEngine, readZip, statusBadge, taskStatus, xmlText,
+} from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
-test("1. proposal: inject, observe progress, preview both products, download real files, mark reviewed, persists", async ({ page }) => {
+const BLOCKED = "BLOCKED: the engine is still the foundation stub (ENGINE_NOT_IMPLEMENTED), so no ready task can exist. Not a pass.";
+
+/** Logs in and skips (BLOCKED) when the real engine is not installed. */
+async function needEngine(page: Page) {
   await login(page);
+  const probe = await probeEngine(page);
+  test.skip(!probe.real, `${BLOCKED} (${probe.detail})`);
+}
+
+test("0. with the stub engine, failure is honest: failed state, no files, no review", async ({ page }) => {
+  await login(page);
+  const probe = await probeEngine(page);
+  test.skip(probe.real, "Engine is real; the stub-failure check does not apply.");
+  const { taskId } = await inject(page.request, "proposal");
+  await page.goto(`/tasks/${taskId}`);
+  await expect(statusBadge(page, "failed")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: "Preparation failed" })).toBeVisible();
+  await expect(page.getByText("ENGINE_NOT_IMPLEMENTED").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Download/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Mark reviewed" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry preparation" })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("article", { name: /Maple|Proposal/i }).first()).toContainText("ENGINE_NOT_IMPLEMENTED");
+});
+
+test("1. proposal: inject, observe progress, preview both products, download real files, mark reviewed, persists", async ({ page }) => {
+  await needEngine(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Run demo/ }).click();
   await page.getByRole("button", { name: /Proposal \+ kickoff deck/ }).click();
   await page.waitForURL(/\/tasks\/[^/]+$/);
+  const taskId = page.url().split("/").pop()!;
+  test.info().annotations.push({ type: "taskId", description: taskId });
 
   // Real, persisted progress is visible while the worker runs.
   await page.getByRole("tab", { name: /^Activity/ }).click();
   await expect(page.getByRole("tabpanel").getByText("Reading request").first()).toBeVisible();
-  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 60_000 });
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
 
   // One proposal document and one presentation, both previewable.
   await expect(page.getByRole("heading", { name: "Content preview" })).toBeVisible();
   const productTabs = page.getByRole("tablist", { name: "Products" }).getByRole("tab");
   await expect(productTabs).toHaveCount(2);
+  const docTitle = (await page.locator(".doc-title").innerText()).trim();
   await expect(page.locator(".doc-page")).toContainText(/6,000/);
   await productTabs.filter({ hasText: /Presentation/ }).click();
   await expect(page.locator(".thumbs li")).toHaveCount(5);
+  const slideTitles = await page.locator(".thumb-title").allInnerTexts();
   await page.locator(".thumb").nth(3).click();
   await expect(page.locator(".slide")).toBeVisible();
 
@@ -35,13 +66,22 @@ test("1. proposal: inject, observe progress, preview both products, download rea
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 
-  // Real downloads, verified as Office ZIP containers.
+  // Real downloads: inspect the bytes the browser received, and compare them with the preview.
   const docx = await downloadFile(page, /Download .*\.docx/);
   expect(docx.name).toMatch(/\.docx$/);
   expectOfficeZip(docx.bytes, "word/document.xml");
+  const docxParts = readZip(docx.bytes);
+  expect(xmlText(docxParts.get("word/document.xml"))).toContain(docTitle);
+  expect(xmlText(docxParts.get("word/document.xml"))).toMatch(/6,000/);
+
   const pptx = await downloadFile(page, /Download .*\.pptx/);
   expect(pptx.name).toMatch(/\.pptx$/);
   expectOfficeZip(pptx.bytes, "ppt/presentation.xml");
+  const pptxParts = readZip(pptx.bytes);
+  const slideParts = [...pptxParts.keys()].filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k));
+  expect(slideParts, "five slide parts in the PPTX").toHaveLength(5);
+  const deckText = slideParts.map((k) => xmlText(pptxParts.get(k))).join("\n");
+  for (const title of slideTitles) expect(deckText).toContain(title.trim());
 
   // Review is recorded server-side and survives a reload.
   await page.getByRole("button", { name: "Mark reviewed" }).click();
@@ -50,13 +90,14 @@ test("1. proposal: inject, observe progress, preview both products, download rea
   await expect(statusBadge(page, "approved")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Marked reviewed" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Mark reviewed" })).toHaveCount(0);
+  expect((await taskStatus(page, taskId)).status).toBe("approved");
 });
 
 test("2. report: calculated values appear consistently in the preview and chart data", async ({ page }) => {
-  await login(page);
+  await needEngine(page);
   const { taskId } = await inject(page.request, "report");
   await page.goto(`/tasks/${taskId}`);
-  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 60_000 });
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
   const main = page.getByRole("main");
   for (const value of [/12,000/, /15,000/, /3,000/, /25%/]) await expect(main.locator(".doc-page")).toContainText(value);
   const chart = page.locator(".chart-svg").first();
@@ -67,10 +108,10 @@ test("2. report: calculated values appear consistently in the preview and chart 
 });
 
 test("3. ambiguous: answer the questions, get a new revision, and generation resumes", async ({ page }) => {
-  await login(page);
+  await needEngine(page);
   const { taskId } = await inject(page.request, "ambiguous");
   await page.goto(`/tasks/${taskId}`);
-  await expect(statusBadge(page, "needs_input")).toBeVisible({ timeout: 60_000 });
+  await expect(statusBadge(page, "needs_input")).toBeVisible({ timeout: 90_000 });
   const form = page.locator("form").filter({ has: page.getByRole("button", { name: /Submit answers/ }) });
 
   // Required answers are enforced before anything is sent.
@@ -84,7 +125,7 @@ test("3. ambiguous: answer the questions, get a new revision, and generation res
   for (let i = 0; i < n; i++) await areas.nth(i).fill(`Answer ${i + 1}: Maple & Moss needs a brand refresh and a website content plan.`);
   await form.getByRole("button", { name: /Submit answers/ }).click();
   await expect(page.getByText(/Revision 2/).first()).toBeVisible({ timeout: 30_000 });
-  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 60_000 });
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
   expect((await taskStatus(page, taskId)).revision).toBe(2);
 });
 
@@ -103,20 +144,20 @@ test("4. duplicate replayKey returns one task", async ({ page }) => {
 });
 
 test("5. no_action is skipped and offers no downloads", async ({ page }) => {
-  await login(page);
+  await needEngine(page);
   const { taskId } = await inject(page.request, "no_action");
   await page.goto(`/tasks/${taskId}`);
-  await expect(statusBadge(page, "skipped")).toBeVisible({ timeout: 60_000 });
+  await expect(statusBadge(page, "skipped")).toBeVisible({ timeout: 90_000 });
   await expect(page.getByRole("heading", { name: "No action needed" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Download/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Mark reviewed" })).toHaveCount(0);
 });
 
 test("6. notifications are labeled honestly (simulated outbox, never delivered)", async ({ page }) => {
-  await login(page);
+  await needEngine(page);
   const { taskId } = await inject(page.request, "proposal");
   await page.goto(`/tasks/${taskId}`);
-  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 60_000 });
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
   await page.goto("/notifications");
   await expect(page.getByText("Simulated (outbox)").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/not sent to any phone or inbox/).first()).toBeVisible();
@@ -147,14 +188,17 @@ test("7. an unauthenticated deep link goes to login and returns to the task", as
   expect(new URL(evil.url()).origin).toBe(new URL(BASE).origin);
   const cli = await request.get(`${BASE}/api/tasks`, { headers: { authorization: `Bearer ${CLI_TOKEN}` }, failOnStatusCode: false });
   expect(cli.status()).toBe(401);
+  // Artifact downloads are private too.
+  const dl = await request.get(`${BASE}/api/artifacts/anything/download`, { failOnStatusCode: false });
+  expect(dl.status()).toBe(401);
   await ctx.close();
 });
 
 test("8. a stale review gets a 409 refresh prompt and approves nothing", async ({ page }) => {
-  await login(page);
+  await needEngine(page);
   const { taskId } = await inject(page.request, "proposal");
   await page.goto(`/tasks/${taskId}`);
-  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 60_000 });
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
   // Make the browser submit an out-of-date revision to the real API.
   await page.route("**/api/tasks/*/review", async (route) => {
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
@@ -170,7 +214,7 @@ test("8. a stale review gets a 409 refresh prompt and approves nothing", async (
 });
 
 test("9. queue and detail are usable on a phone-sized screen", async ({ browser, page }) => {
-  await login(page);
+  await needEngine(page);
   const { taskId } = await inject(page.request, "proposal");
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
   const m = await ctx.newPage();
@@ -180,7 +224,7 @@ test("9. queue and detail are usable on a phone-sized screen", async ({ browser,
   await expect(m.getByRole("heading", { name: "Work queue" })).toBeVisible();
   await noOverflow();
   await m.goto(`${BASE}/tasks/${taskId}`);
-  await expect(statusBadge(m, "ready")).toBeVisible({ timeout: 60_000 });
+  await expect(statusBadge(m, "ready")).toBeVisible({ timeout: 90_000 });
   await noOverflow();
   const button = m.getByRole("button", { name: "Mark reviewed" });
   await button.scrollIntoViewIfNeeded();
@@ -203,4 +247,49 @@ test("10. settings persist across a reload", async ({ page }) => {
   await expect(page.getByText("Saved").first()).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue(`${original} QA`);
+});
+
+test("11. ingestion time and original email time are labeled separately and are the real values", async ({ page }) => {
+  await login(page);
+  const { taskId } = await inject(page.request, "proposal");
+  const res = await page.request.get(`${BASE}/api/tasks/${taskId}`);
+  const detail = ((await res.json()) as { data: { task: { createdAt: string }; email: { receivedAt: string } } }).data;
+  const settings = await page.request.get(`${BASE}/api/settings`);
+  const tz = ((await settings.json()) as { data: { organization: { timezone: string } } }).data.organization.timezone;
+  const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: tz, dateStyle: "medium" });
+
+  await page.goto(`/tasks/${taskId}`);
+  const times = page.getByTestId("task-times");
+  await expect(times.getByText(/^Entered the system/)).toContainText(day(detail.task.createdAt));
+  await expect(times.getByText(/^Original email received/)).toContainText(day(detail.email.receivedAt));
+  expect(day(detail.email.receivedAt)).not.toBe(day(detail.task.createdAt)); // fixture dates are intentionally old
+
+  // The request tab carries both labels as well.
+  await page.getByRole("tab", { name: "Original request" }).click();
+  await expect(page.getByRole("tabpanel").getByText("Original email received", { exact: true })).toBeVisible();
+  await expect(page.getByRole("tabpanel").getByText("Entered the system", { exact: true })).toBeVisible();
+
+  // Queue cards show only ingestion time, and say so.
+  await page.goto("/");
+  await expect(page.getByRole("article").first()).toContainText("entered the system");
+});
+
+test("12. keyboard: source dialog opens and closes with focus restored, and review works without a mouse", async ({ page }) => {
+  await needEngine(page);
+  const { taskId } = await inject(page.request, "proposal");
+  await page.goto(`/tasks/${taskId}`);
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
+  const chip = page.locator(".doc-page .chip").first();
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(chip).toBeFocused();
+
+  const review = page.getByRole("button", { name: "Mark reviewed" });
+  await review.focus();
+  await expect(review).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Marked reviewed" })).toBeVisible();
 });

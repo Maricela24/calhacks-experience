@@ -68,7 +68,7 @@ export function TaskCard({ task, nowMs }: { task: TaskSummary; nowMs: number }) 
       </div>
       <p className="card-meta">
         <span className="wrap-anywhere">{task.senderName ? `${task.senderName} <${task.senderEmail}>` : task.senderEmail}</span>
-        <span className="muted"> · {formatRelative(task.createdAt, nowMs)}</span>
+        <span className="muted" title="When the request entered AfterHours (not the original email date)"> · entered the system {formatRelative(task.createdAt, nowMs)}</span>
       </p>
       <p className="card-subject wrap-anywhere">{truncate(task.subject, 140)}</p>
       <div className="chips">

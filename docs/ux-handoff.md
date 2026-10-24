@@ -41,22 +41,40 @@ supports it) before saving, and report success only afterwards. Failures show in
 Palette from the brief. One deliberate change: secondary text is `#52687F` (not `#627D98`) and primary buttons use `#0F766E`
 (accent `#14B8A6` stays for focus rings and highlights) so small text and white-on-teal meet WCAG AA contrast.
 
-## Checks actually run
+## Timestamps
 
-- `pnpm typecheck`, `pnpm lint`, `pnpm build` (incl. `next build`): pass. `pnpm test`: 87 tests pass (26 new in delivery).
-- `pnpm test:e2e` (10 Playwright tests, isolated temp DB/artifacts, real API + worker + web): **10/10 pass, but against a local
-  scratch engine, not Person 2's engine** (it was not on the remote yet). The scratch engine is not committed. **Re-run
-  `pnpm test:e2e` after merging the real engine.** Assertions about content ("6,000", five slides, 12,000/15,000/3,000/25%)
-  are the contract values and may expose differences in the real output.
-- Tests cover: login/deep link/`returnTo` safety/CLI token scope; proposal flow with previews, source dialog, real downloads
-  (ZIP signature and part names), mark reviewed + reload; CSV values in preview and chart; ambiguous answers → revision 2 →
-  ready; duplicate `replayKey`; skipped without downloads; honest outbox labeling; stale review 409; 390 px layout (no
-  horizontal overflow, ≥ 40 px review button); settings persistence.
-- Also seen manually in a browser: failed state for `MODEL_NOT_CONFIGURED` (Settings link, retry), desktop and phone layouts.
+Two different times are always labeled separately: **Entered the system** is `task.createdAt` (ingestion time) and
+**Original email received** is `email.receivedAt` (the message's own time). Demo fixtures carry an intentionally old
+`receivedAt`, so the two differ. Task header and the Original request tab show both; queue cards show only "entered the
+system N ago" because `TaskSummary` has no `receivedAt`. E2E test 11 checks both labels against the API values.
+
+## Running locally (ports)
+
+`API_PORT` and `API_ORIGIN` must name the same port (see `docs/runbook.md`, "Using a different API port locally"; `pnpm
+check:ready` verifies). The web proxy reads `API_ORIGIN` at `next dev`/`next build`. The browser suite does not touch your
+`.env` or database: `pnpm test:e2e` starts API :4100, worker, and web :3100 on temp storage with matching values
+(`E2E_API_PORT`/`E2E_WEB_PORT` override). Exit code 3 means "BLOCKED": some tests could not run because the real engine is
+missing. That is never a pass.
+
+## Checks actually run (Batch 2, merged baseline `b442c71` + experience)
+
+- `pnpm typecheck`, `pnpm lint`, `pnpm test` (100 tests, 26 of them delivery), `pnpm build`: pass.
+- `pnpm test:e2e` against the real merged baseline (engine is still the foundation stub): 5 pass, 8 BLOCKED (exit 3).
+  The 5: honest stub failure (`ENGINE_NOT_IMPLEMENTED`, no files, no review button, retry offered), duplicate `replayKey`,
+  unauthenticated deep link + login return + open-redirect rejection + CLI token/download 401, settings persistence,
+  timestamp labels.
+- The 8 BLOCKED tests (proposal flow, report, ambiguous, no_action, notifications, stale review, mobile, keyboard) need a
+  ready task. They passed (12/12 applicable) only against a **local scratch engine that is not committed and is not
+  Joanne's engine**. That run shows the UI, API, worker, downloads, and review persistence work together. It is **not** the
+  Batch 2 gate: its Office files are synthetic ZIPs, not real documents.
+- Worker stopped (manual, real API + web, no worker process): banner "The worker is not running", task page
+  "Waiting for the worker", card "Waiting for the worker to start"; after the worker started the banner disappeared and
+  the task reached ready (scratch engine).
+- Desktop 1440 px and phone 390 px screenshots inspected manually; no horizontal overflow (asserted in test 9).
 
 ## Not verified / remaining
 
-- Real engine output, live model, live Gmail, live WhatsApp: none exercised from the UI.
+- Real engine output (Joanne), live model, live Gmail, live WhatsApp: none exercised from the UI.
 - Downloaded files were checked as ZIP containers only; opening them in Word/PowerPoint was not done.
 - Stale-worker banner and queued-while-worker-offline wording are implemented from `IntegrationStatus.worker.healthy` but not
   covered by an automated test. The needs_input → "retained answers" prefill is implemented, not separately tested.
