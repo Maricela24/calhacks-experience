@@ -29,6 +29,15 @@ describe("Batch 6 report variation", () => {
     expect(new TextDecoder().decode(deck.get("ppt/slides/slide2.xml")!)).toContain("Revenue increased 33.3%");
   }, 20_000);
 
+  it("says 'in both months' instead of 'X to X' for unchanged metrics", async () => {
+    const result = await runWork(await inputFor("report"), deps());
+    if (result.outcome !== "ready") throw new Error("expected ready");
+    const deck = JSON.stringify(result.products.find((product) => product.kind === "presentation"));
+    expect(deck).toContain("Average order value: $100 in both months");
+    expect(deck).toContain("Website share of revenue: 66.7% in both months");
+    expect(deck).not.toContain("$100 to $100");
+  }, 20_000);
+
   it("never rejects its own rounded percentages across many revenue values", async () => {
     // Regression: 25.83% displayed as 25.8% was rejected as an unsupported number.
     for (let february = 9_000; february <= 11_200; february += 37) {

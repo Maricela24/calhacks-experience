@@ -104,6 +104,9 @@ function change(value: number | null, delta: number, noun: string): string {
   return `${noun} ${delta > 0 ? "increased" : "decreased"} ${pctText(value)}`;
 }
 
+/** "A to B", or "A in both months" when unchanged. */
+const span = (from: string, to: string) => from === to ? `${from} in both months` : `${from} to ${to}`;
+
 export function reportTitle(metrics: SalesMetrics): string {
   const [first, second] = metrics.months;
   const sameYear = first!.month.slice(0, 4) === second!.month.slice(0, 4);
@@ -146,7 +149,7 @@ export function reportProducts(input: EngineInput, sources: SourceDocument[], pl
     slide(`${deckId}-1`, `${period} sales update`, "title", [paragraph(`${deckId}-1a`, "Dataset scope", `Revenue and orders by channel: ${sentenceList(byRevenue.slice(0, 4).map((channel) => channel.channel), true)}${byRevenue.length > 4 ? ", and others" : ""}`, "calculated", dataRef)], "All values are calculated in code from the attached CSV."),
     slide(`${deckId}-2`, revenueTitle, "chart", [{ ...chart, id: `${deckId}-2a` }], `${revenueLine} Causality is not established.`),
     slide(`${deckId}-3`, "Channel performance", metrics.channels.length === 2 ? "two_column" : "bullets", channelBlocks, metrics.channels.length > 6 ? "Only the six largest channels are shown; the report lists every channel." : "Values are channel revenue sums from the CSV."),
-    slide(`${deckId}-4`, "Orders and order value", "bullets", [bullets(`${deckId}-4a`, "Key metrics", [`Orders: ${first!.orders} to ${second!.orders} (${change(metrics.orderGrowthPercent, metrics.orderChange, "orders")})`, `Average order value: ${aov(first!.averageOrderValueMinor)} to ${aov(second!.averageOrderValueMinor)}`, topTied ? "Several channels tied for the largest revenue share" : `${top.channel} share of revenue: ${top.sharePercent[first!.month]}% to ${top.sharePercent[second!.month]}%`], "calculated", dataRef)], "Average order value is revenue divided by orders for each month."),
+    slide(`${deckId}-4`, "Orders and order value", "bullets", [bullets(`${deckId}-4a`, "Key metrics", [`Orders: ${first!.orders} to ${second!.orders} (${change(metrics.orderGrowthPercent, metrics.orderChange, "orders")})`, `Average order value: ${span(aov(first!.averageOrderValueMinor), aov(second!.averageOrderValueMinor))}`, topTied ? "Several channels tied for the largest revenue share" : `${top.channel} share of revenue: ${span(`${top.sharePercent[first!.month]}%`, `${top.sharePercent[second!.month]}%`)}`], "calculated", dataRef)], "Average order value is revenue divided by orders for each month."),
     slide(`${deckId}-5`, "Limits and next steps", "closing", [bullets(`${deckId}-5a`, "Keep the interpretation bounded", ["Do not infer campaign causality", "Add cost and exposure data", "Track margin and returns", "Continue channel-level monitoring"], "recommendation")], "ROAS, CAC, profit, retention, and conversion are not computable from this dataset."),
   ];
   return [
