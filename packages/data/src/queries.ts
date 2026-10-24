@@ -5,7 +5,7 @@ import type {
 import type { AppConfig } from "./config";
 import { modelStatus, whatsappConfigured } from "./config";
 import type { Db } from "./db";
-import { notFound } from "./errors";
+import { badRequest, notFound } from "./errors";
 import { decodeCursor, encodeCursor, rowToNotification } from "./notifications";
 import type { TaskRow } from "./tasks";
 import { iso, parseJson } from "./util";
@@ -45,6 +45,7 @@ export function listTasks(
 ): { items: TaskSummary[]; nextCursor: string | null } {
   const limit = Math.min(opts.limit ?? 30, 100);
   const c = opts.cursor ? decodeCursor(opts.cursor) : null;
+  if (opts.cursor && !c) throw badRequest("Invalid cursor.");
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.status) { where.push("status = ?"); args.push(opts.status); }

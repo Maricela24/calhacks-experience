@@ -159,3 +159,48 @@ revision 2 ready.
 2. Person 1 merges `engine` first, then runs `pnpm demo:proposal` / `demo:report` to a `ready` task and checks
    downloads open in Word/PowerPoint.
 3. Then Gmail with a configured Google test client, then quiet-hours rehearsal with a controlled clock.
+
+
+## Batch 3 platform semantics (clarification, revisions, state integrity)
+
+Everything below is covered by tests that use a **fake engine** where an engine is needed. None of it proves real
+document generation.
+
+### Route and validation semantics
+
+| Request | Success | Failure codes |
+|---|---|---|
+| `POST /v1/tasks/:id/answers` `{revision, answers[1..50]}` | 200 `TaskSummary`, `status: "queued"`, `revision + 1` | 400 `VALIDATION_ERROR` (empty list, non-integer revision, unknown question id, duplicate id, required question missing or blank, answer > 5000 chars); 409 `STALE_REVISION` (`details.currentRevision`); 409 `INVALID_TRANSITION` (task not `needs_input`); 404 `NOT_FOUND`; 403 `BAD_ORIGIN`; 401 |
+| `POST /v1/tasks/:id/retry` `{revision}` | 200, `queued`, `revision + 1` | 409 `INVALID_TRANSITION` unless `failed`; 409 `STALE_REVISION` |
+| `POST /v1/tasks/:id/review` `{revision, action}` | 200, `approved` or `dismissed`, same revision | `approve` only from `ready`; `dismiss` from `ready`, `needs_input`, `failed`, `skipped`; otherwise 409 `INVALID_TRANSITION`; stale 409 `STALE_REVISION` |
+| Bad body / JSON / query / cursor | 400 `VALIDATION_ERROR` or `BAD_REQUEST` | oversized body 413 `PAYLOAD_TOO_LARGE` (limit 256 KiB); a malformed `cursor` is now 400 (it used to silently return page 1) |
+
+Order of checks: revision first (stale wins), then state, then answer content. A failed validation writes nothing.
+All checks and writes happen in one `BEGIN IMMEDIATE` transaction, so concurrent submits serialize across processes.
+
+### Revision behaviour
+- Answers and manual retry create revision N+1 and exactly one job (`UNIQUE(task_id, revision)`), in the same transaction as the status change and event.
+- Retained answers merge by question id into `TaskDetail.answers`; every submitted answer is also archived with its question text in `answer_history` (not exposed; see CCR-1).
+- `TaskDetail.artifacts` = current revision only. `events` = all revisions, each keeping its `revision`. `sources` = latest revision that has stored sources. `questions` is empty once answered.
+- A worker or review action carrying an old revision is rejected: `LeaseLostError` for workers (writes nothing), `STALE_REVISION` for reviews.
+- Notification dedupe keys are `<taskId>/<revision>/<channel>`; a task that is ready in two revisions gets two intents.
+
+### Intake boundaries (single enforcement point: `ingestMessage`)
+Max 5 files, 10 MB per file, 20 MB total, no repeated attachment ids, body cut at 60,000 chars. A file that is not stored
+gets a visible `warning` event on the task ("Attachment X was not read: <reason>"). If the envelope still lists it, the worker
+fails the task with `ATTACHMENT_UNAVAILABLE` (non-retryable) before calling the engine. Demo attachments come only from
+`fixtures/` via `resolveFixturePath` (rejects traversal, absolute paths, NUL, symlink escapes).
+Extracted-text caps for model input are the engine's job.
+
+### State machine
+`packages/data/src/state.ts` is the only transition table; `setStatus` is the only code that writes `tasks.status`.
+`packages/data/test/batch3.test.ts` checks all 81 (from, to) pairs against the spec table, plus the recovery exception.
+
+### Tests added in Batch 3 (fake engine where noted)
+- `packages/data/test/batch3.test.ts` — state table, answers (valid/invalid/stale/duplicate/retained), 6-process answer race, approve/dismiss process race, stale worker after retry, notification dedupe across revisions, intake limits, fixture path safety.
+- `apps/api/test/batch3.test.ts` — status × action matrix over HTTP, answer error codes, 10 simultaneous HTTP submits, resumed-clarification task detail, malformed/oversized requests.
+- `apps/worker/test/batch3.test.ts` — **fake engine**: four scenarios through `injectDemo` and the worker, real fixture bytes reach the engine, resumed clarification, dropped attachment, notification failure does not rerun generation.
+
+### Still blocked (needs teammates' branches)
+Real engine outputs for report, ambiguous and no_action; real browser clarification flow; Eden's independent run; the merged
+Batch 2/3 gate. See `docs/batches/batch-3/darren.md` and `docs/batches/batch-2/integration.md`.

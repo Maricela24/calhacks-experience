@@ -117,8 +117,35 @@ export function ingestMessage(db: Db, input: IngestInput, now: Date): IngestOutc
     const ins = db.prepare(
       "INSERT INTO task_attachments (task_id, attachment_id, filename, mime_type, size_bytes, bytes) VALUES (?,?,?,?,?,?)",
     );
+    // Intake is the one enforcement point for attachment limits, whatever the source. A file that is
+    // not stored is reported as a visible warning; the worker then refuses to treat the input as complete.
+    const keptIds = new Set<string>();
+    let keptBytes = 0;
+    const reasonFor = new Map<string, string>();
+    const warnedIds = new Set<string>();
+    const drop = (a: IngestAttachment, why: string) => {
+      reasonFor.set(a.id, why);
+      warnedIds.add(a.id);
+      warnings.push(`Attachment "${a.filename}" was not read: ${why}.`);
+    };
     for (const a of input.attachments) {
-      ins.run(taskId, a.id, a.filename, a.mimeType, a.bytes.byteLength, Buffer.from(a.bytes));
+      const size = a.bytes.byteLength;
+      if (keptIds.has(a.id)) drop(a, "its id repeats an earlier attachment");
+      else if (keptIds.size >= LIMITS.maxFiles) drop(a, `only the first ${LIMITS.maxFiles} files per email are read`);
+      else if (size > LIMITS.maxFileBytes) drop(a, `it is larger than ${LIMITS.maxFileBytes / (1024 * 1024)} MB`);
+      else if (keptBytes + size > LIMITS.maxTotalBytes) drop(a, `attachments together may not exceed ${LIMITS.maxTotalBytes / (1024 * 1024)} MB`);
+      else {
+        ins.run(taskId, a.id, a.filename, a.mimeType, size, Buffer.from(a.bytes));
+        keptIds.add(a.id);
+        keptBytes += size;
+      }
+    }
+    for (const meta of envelope.attachments) {
+      if (keptIds.has(meta.id) || warnedIds.has(meta.id)) continue;
+      const why = meta.sizeBytes > LIMITS.maxFileBytes
+          ? `it is larger than ${LIMITS.maxFileBytes / (1024 * 1024)} MB`
+          : "it was not provided to the intake step (over the file-count or total-size limit, or it could not be fetched)";
+      warnings.push(`Attachment "${meta.filename}" was not read: ${why}.`);
     }
 
     db.prepare(

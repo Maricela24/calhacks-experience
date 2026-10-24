@@ -1,6 +1,7 @@
 import { DateTime } from "luxon";
 import type { NotificationRecord, WorkspaceSettings } from "@afterhours/contracts";
 import type { Db } from "./db";
+import { badRequest } from "./errors";
 import { addEvent } from "./events";
 import { getSettings } from "./settings";
 import { addSeconds, iso, newId, parseJson } from "./util";
@@ -231,6 +232,7 @@ export function recoverNotificationLeases(db: Db, now: Date): number {
 
 export function listNotifications(db: Db, cursor: string | null, limit: number): { items: NotificationRecord[]; nextCursor: string | null } {
   const c = cursor ? decodeCursor(cursor) : null;
+  if (cursor && !c) throw badRequest("Invalid cursor.");
   const rows = (c
     ? db.prepare(
         `SELECT * FROM notifications WHERE (created_at < ? OR (created_at = ? AND id < ?))

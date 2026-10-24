@@ -16,7 +16,20 @@ Status: proposed | approved | rejected | merged (commit)
 
 ## Open
 
-None.
+```text
+ID: CCR-1
+Requested by / role: Darren (Person 1), on behalf of the clarification UI (Maricella) — PROPOSAL ONLY, not implemented
+Blocker (what cannot be built without it): After a clarification round, `TaskDetail.questions` is empty and
+  `TaskDetail.answers` holds only `{ questionId, answer }`. The UI cannot show "what was asked" next to a retained
+  answer. The question text is stored (`answer_history.question`) but not exposed. `plan.questions` is overwritten
+  by later revisions.
+Proposed change: add an optional field to `TaskDetail`: `answerHistory?: Array<{ revision: number; questionId: string;
+  question: string; answer: string; createdAt: string }>`, ordered by revision then creation. Additive and optional;
+  no route changes.
+Compatibility impact on other owners: Maricella may ignore it; Joanne unaffected. Zod schema gains one optional key.
+Status: proposed (needs Maricella's yes before Darren merges it). Workaround today: show the answers by
+  questionId, or render the question text from the earlier needs_input event messages.
+```
 
 ## Platform notes (not amendments)
 
