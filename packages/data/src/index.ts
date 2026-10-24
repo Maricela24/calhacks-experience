@@ -11,6 +11,7 @@ export * from "./tasks";
 export * from "./queue";
 export * from "./review";
 export * from "./queries";
+export * from "./schedule";
 export * from "./notifications";
 export * from "./artifacts";
 export * from "./engineResult";

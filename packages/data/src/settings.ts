@@ -1,4 +1,3 @@
-import { DateTime } from "luxon";
 import {
   OrganizationProfileSchema,
   WorkspaceSettingsSchema,
@@ -7,10 +6,12 @@ import {
 } from "@afterhours/contracts";
 import type { Db } from "./db";
 import { badRequest } from "./errors";
+import { isValidIanaZone, parseHHmm, ScheduleError } from "./schedule";
 import { iso } from "./util";
 
+/** IANA zone names only (no fixed-offset or "system" aliases). */
 export function isValidZone(zone: string): boolean {
-  return DateTime.local().setZone(zone).isValid;
+  return isValidIanaZone(zone);
 }
 
 export const defaultSettings = (
@@ -68,6 +69,11 @@ function validatePatch(patch: SettingsPatch): void {
       if (v !== undefined && !HEX_COLOR.test(v)) throw badRequest(`organization.brand.${c} must be a #RRGGBB color.`);
     }
   }
+  const qh = patch.notifications?.quietHours;
+  for (const [label, v] of [["quietHours.start", qh?.start], ["quietHours.end", qh?.end], ["digestTime", patch.notifications?.digestTime]] as const) {
+    if (v === undefined) continue;
+    try { parseHHmm(v); } catch (e) { if (e instanceof ScheduleError) throw badRequest(`notifications.${label} must be a 24-hour HH:mm time such as 08:00.`); throw e; }
+  }
   const r = patch.notifications?.recipient;
   if (r !== undefined && r !== null && !E164.test(r)) {
     throw badRequest("notifications.recipient must be an E.164 phone number such as +15551234567, or null.");
@@ -104,6 +110,12 @@ export function patchSettings(db: Db, patch: SettingsPatch, now: Date): Workspac
   OrganizationProfileSchema.parse(next.organization);
   for (const z of [next.organization.timezone, next.notifications.quietHours.timezone]) {
     if (!isValidZone(z)) throw badRequest(`Unknown IANA timezone: ${z}`);
+  }
+  const q = next.notifications.quietHours;
+  if (patch.notifications?.quietHours && q.enabled && q.start === q.end) {
+    throw badRequest(
+      "Quiet hours start and end are the same time, which is ambiguous. Choose different times, or turn quiet hours off.",
+    );
   }
   const final = WorkspaceSettingsSchema.parse(next);
   db.prepare("UPDATE workspace_settings SET settings_json = ?, updated_at = ? WHERE id = 1").run(

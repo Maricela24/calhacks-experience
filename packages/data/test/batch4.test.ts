@@ -317,11 +317,13 @@ describe("artifact ids are platform-owned (engine ids are opaque)", () => {
     for (const s of stored) {
       expect(s.id).toBe(artifactIdFor(taskId, 1, s.productId, s.format));
       expect(s.id).toMatch(/^art_[0-9a-f]{32}$/);
-      expect(s.relPath).toBe(`${taskId}/r1/${s.id}.${s.format}`);
+      expect(s.relPath).toBe(`${taskId}/r1/${s.id}.${s.sha256.slice(0, 16)}.${s.format}`);
       expect(resolveArtifactPath(config.artifactsDir, s.relPath)).not.toBeNull();
     }
-    // A retry of the same revision rewrites the same names.
-    expect(publishArtifactFiles(config.artifactsDir, taskId, 1, files).map((s) => s.id)).toEqual(stored.map((s) => s.id));
+    // A retry of the same revision with the same bytes yields the same ids and the same immutable paths.
+    const again = publishArtifactFiles(config.artifactsDir, taskId, 1, files);
+    expect(again.map((s) => s.id)).toEqual(stored.map((s) => s.id));
+    expect(again.map((s) => s.relPath)).toEqual(stored.map((s) => s.relPath));
     expect(artifactIdFor(taskId, 2, stored[0]!.productId, stored[0]!.format)).not.toBe(stored[0]!.id);
   });
 });
