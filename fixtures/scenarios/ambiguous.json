@@ -1,18 +1,13 @@
 {
   "scenario": "ambiguous",
   "email": {
-    "providerMessageId": "placeholder",
-    "providerThreadId": null,
-    "from": {
-      "name": "Jordan Lee",
-      "email": "jordan@client.example"
-    },
-    "to": [
-      "team@harbor.example"
-    ],
-    "subject": "Proposal",
-    "receivedAt": "2026-01-12T17:00:00.000Z",
-    "bodyText": "FOUNDATION PLACEHOLDER (Person 2 owns): Prepare the proposal.",
+    "providerMessageId": "demo-ambiguous-base",
+    "providerThreadId": "demo-thread-ambiguous",
+    "from": { "name": "Taylor Reed", "email": "taylor@prospect.example" },
+    "to": ["team@harbor-creative.example"],
+    "subject": "Proposal and short deck for client meeting",
+    "receivedAt": "2026-10-23T19:00:00.000Z",
+    "bodyText": "Please prepare the proposal and a short deck for the client meeting.",
     "attachments": []
   },
   "attachmentFiles": []

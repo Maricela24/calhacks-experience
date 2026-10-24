@@ -1,31 +1,18 @@
 {
   "scenario": "proposal",
   "email": {
-    "providerMessageId": "placeholder",
-    "providerThreadId": null,
-    "from": {
-      "name": "Jordan Lee",
-      "email": "jordan@client.example"
-    },
-    "to": [
-      "team@harbor.example"
-    ],
-    "subject": "Proposal and kickoff deck for Maple & Moss",
-    "receivedAt": "2026-01-12T17:00:00.000Z",
-    "bodyText": "FOUNDATION PLACEHOLDER (Person 2 owns): Please prepare a project proposal and a five-slide kickoff deck. Brief attached.",
+    "providerMessageId": "demo-proposal-base",
+    "providerThreadId": "demo-thread-maple",
+    "from": { "name": "Alex Morgan", "email": "alex@maple-and-moss.example" },
+    "to": ["team@harbor-creative.example"],
+    "subject": "Proposal and five-slide kickoff deck for Maple & Moss",
+    "receivedAt": "2026-10-23T19:00:00.000Z",
+    "bodyText": "Please prepare a proposal DOCX and a five-slide kickoff PPTX using the attached brief and Harbor Creative's standard package. Please have the review draft ready by Monday, October 26, 2026 at 9:00 AM Pacific, before our client discussion. The engagement would start October 26 and run for four weeks.",
     "attachments": [
-      {
-        "id": "att-brief",
-        "filename": "maple-and-moss-brief.md",
-        "mimeType": "text/markdown",
-        "sizeBytes": 233
-      }
+      { "id": "att-maple-brief", "filename": "maple-and-moss-brief.md", "mimeType": "text/markdown", "sizeBytes": 745 }
     ]
   },
   "attachmentFiles": [
-    {
-      "attachmentId": "att-brief",
-      "relativePath": "attachments/maple-and-moss-brief.md"
-    }
+    { "attachmentId": "att-maple-brief", "relativePath": "attachments/maple-and-moss-brief.md" }
   ]
 }

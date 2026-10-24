@@ -1,18 +1,13 @@
 {
   "scenario": "no_action",
   "email": {
-    "providerMessageId": "placeholder",
-    "providerThreadId": null,
-    "from": {
-      "name": "Jordan Lee",
-      "email": "jordan@client.example"
-    },
-    "to": [
-      "team@harbor.example"
-    ],
-    "subject": "Studio newsletter: spring hours",
-    "receivedAt": "2026-01-12T17:00:00.000Z",
-    "bodyText": "FOUNDATION PLACEHOLDER (Person 2 owns): FYI only, no action needed.",
+    "providerMessageId": "demo-no-action-base",
+    "providerThreadId": "demo-thread-newsletter",
+    "from": { "name": "Harbor Updates", "email": "updates@newsletter.example" },
+    "to": ["team@harbor-creative.example"],
+    "subject": "FYI: October studio newsletter",
+    "receivedAt": "2026-10-23T19:00:00.000Z",
+    "bodyText": "FYI only: here is the October newsletter. No action is requested.",
     "attachments": []
   },
   "attachmentFiles": []
