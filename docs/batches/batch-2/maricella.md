@@ -3,7 +3,7 @@
 Batch and owner: Batch 2, Maricella / Person 3.
 Branch: `experience`.
 Base/foundation commit: `5d8f342`. Merged `origin/platform` at `b442c71` (includes Darren's `e5b8510`) with a clean merge commit `691c3cd`; no conflicts, my files untouched by the merge.
-Implementation commit or working-tree status: see the final line of this file (filled in by a docs-only commit after pushing the code, like Darren's).
+Implementation commit or working-tree status: code and report at `84a372e` on `experience` (parent `691c3cd`, the merge of `platform` `b442c71`). Committed locally; **NOT PUSHED** (GitHub returned 403: Claude lacks access to the org repo).
 Scope implemented: the Batch 2 user flow in `apps/web` (login with safe `returnTo`, queue, demo injection, task detail with persisted progress, structured previews, verified downloads, "Mark reviewed", notifications history, settings status), `packages/delivery` outbox/composition (also the Twilio adapter, blocked unless configured and eligible), and `tests/e2e`. Batch 3 prompt was read and **not started**: the Batch 2 gate is not recorded.
 
 ## Gate status: BLOCKED on Joanne's engine
