@@ -35,6 +35,14 @@ export function sanitizeFilename(name: string, fallback: string): string {
 }
 
 /**
+ * Platform artifact id, deterministic per task/revision/product/format. Engine file ids are opaque
+ * (they may contain "/" or other characters), so they are never used as a path segment or a URL id.
+ */
+export function artifactIdFor(taskId: string, revision: number, productId: string, format: string): string {
+  return `art_${createHash("sha256").update(`${taskId}\0${revision}\0${productId}\0${format}`).digest("hex").slice(0, 32)}`;
+}
+
+/**
  * Write files into a staging directory, then atomically rename each into
  * <root>/<taskId>/r<revision>/. Paths are deterministic, so a retry after a crash rewrites the
  * same names. Returns manifest rows; the DB manifest is published only after this succeeds fully.
@@ -48,24 +56,25 @@ export function publishArtifactFiles(root: string, taskId: string, revision: num
   try {
     const seen = new Set<string>();
     const prepared = files.map((f) => {
-      if (!SAFE.test(f.id)) throw new ArtifactValidationError(`Unsafe file id: ${f.id}`);
+      if (!f.id) throw new ArtifactValidationError(`${f.filename}: missing file id`);
       const key = `${f.productId}/${f.format}`;
       if (seen.has(key)) throw new ArtifactValidationError(`Duplicate file for product ${f.productId} (${f.format})`);
       seen.add(key);
       if (f.mimeType !== MIME[f.format]) throw new ArtifactValidationError(`${f.filename}: MIME type does not match ${f.format}`);
       validateOfficeBytes(f);
-      const rel = path.posix.join(taskId, `r${revision}`, `${f.id}.${f.format}`);
-      return { f, rel, sha: sha256Bytes(f.bytes) };
+      const id = artifactIdFor(taskId, revision, f.productId, f.format);
+      const rel = path.posix.join(taskId, `r${revision}`, `${id}.${f.format}`);
+      return { f, id, rel, sha: sha256Bytes(f.bytes) };
     });
-    for (const p of prepared) writeFileSync(path.join(staging, `${p.f.id}.${p.f.format}`), p.f.bytes, { mode: 0o640 });
+    for (const p of prepared) writeFileSync(path.join(staging, `${p.id}.${p.f.format}`), p.f.bytes, { mode: 0o640 });
     const out: StoredFile[] = [];
     for (const p of prepared) {
-      renameSync(path.join(staging, `${p.f.id}.${p.f.format}`), path.join(root, p.rel));
+      renameSync(path.join(staging, `${p.id}.${p.f.format}`), path.join(root, p.rel));
       const size = statSync(path.join(root, p.rel)).size;
       if (size !== p.f.bytes.byteLength) throw new ArtifactValidationError(`${p.f.filename}: size mismatch after write`);
       out.push({
-        id: p.f.id, productId: p.f.productId, format: p.f.format,
-        filename: sanitizeFilename(p.f.filename, `${p.f.id}.${p.f.format}`),
+        id: p.id, productId: p.f.productId, format: p.f.format,
+        filename: sanitizeFilename(p.f.filename, `${p.id}.${p.f.format}`),
         mimeType: p.f.mimeType, sizeBytes: size, sha256: p.sha, relPath: p.rel,
       });
     }

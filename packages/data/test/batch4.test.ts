@@ -2,11 +2,11 @@
 // Google is replaced by an in-memory GmailApi (mock). These tests do not prove live Google access.
 import { describe, expect, it } from "vitest";
 import {
-  getGmailCheckpoint, getGmailRow, getGmailTokens, getIntegrationStatus, getTaskDetail, isCurrentGmailConnection,
+  artifactIdFor, getGmailCheckpoint, getGmailRow, publishArtifactFiles, resolveArtifactPath, getGmailTokens, getIntegrationStatus, getTaskDetail, isCurrentGmailConnection,
   patchSettings, pollGmailOnce, saveGmailConnection, disconnectGmail, updateGmailTokens, MAX_MESSAGES_PER_CYCLE,
   type GmailApi, type GmailMessage, type GmailPart, type PollDeps,
 } from "../src";
-import { makeTestConfig, makeTestDb } from "../src/testing";
+import { makeTestConfig, makeTestDb, readyResult } from "../src/testing";
 
 const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64url");
 const T0 = new Date("2026-10-20T17:00:00Z");
@@ -302,5 +302,26 @@ describe("integration status explains missing setup without secrets", () => {
     expect(getIntegrationStatus(okCfg.db, okCfg.config, T0).gmail.lastError).toBeNull();
     expect(JSON.stringify(getIntegrationStatus(okCfg.db, okCfg.config, T0))).not.toMatch(/"sec"|"id"/);
     void isCurrentGmailConnection;
+  });
+});
+
+describe("artifact ids are platform-owned (engine ids are opaque)", () => {
+  it("accepts engine file ids containing '/' and stores files under deterministic safe ids", () => {
+    const { config } = makeTestDb();
+    const taskId = "b681cac0-d697-4e3a-b4cb-62884458659f";
+    const r = readyResult({ taskId, revision: 1 });
+    // Shape of the real engine's stableId output: task/revision/product/format plus a hash.
+    const files = r.files.map((f) => ({ ...f, id: `${taskId}/1/${f.productId}/${f.format}-1f85ffc35054` }));
+    const stored = publishArtifactFiles(config.artifactsDir, taskId, 1, files);
+    expect(stored).toHaveLength(files.length);
+    for (const s of stored) {
+      expect(s.id).toBe(artifactIdFor(taskId, 1, s.productId, s.format));
+      expect(s.id).toMatch(/^art_[0-9a-f]{32}$/);
+      expect(s.relPath).toBe(`${taskId}/r1/${s.id}.${s.format}`);
+      expect(resolveArtifactPath(config.artifactsDir, s.relPath)).not.toBeNull();
+    }
+    // A retry of the same revision rewrites the same names.
+    expect(publishArtifactFiles(config.artifactsDir, taskId, 1, files).map((s) => s.id)).toEqual(stored.map((s) => s.id));
+    expect(artifactIdFor(taskId, 2, stored[0]!.productId, stored[0]!.format)).not.toBe(stored[0]!.id);
   });
 });

@@ -158,7 +158,7 @@ export function liveModelProblem(c: AppConfig): { code: string; message: string 
     return { code: "MODEL_NOT_CONFIGURED", message: "Live generation is selected but MODEL_PROVIDER is not set to a supported provider (openai) on the server." };
   }
   if (!c.openaiApiKey || !c.modelName) {
-    return { code: "MODEL_NOT_CONFIGURED", message: "Live generation is selected but the server is missing OPENAI_API_KEY or MODEL_NAME. Set them, or switch GENERATION_MODE=fixture for new tasks." };
+    return { code: "MODEL_NOT_CONFIGURED", message: "Live generation is selected but the server is missing the OpenAI API key or MODEL_NAME. Set both in the server environment, or switch GENERATION_MODE=fixture for new tasks." };
   }
   return null;
 }
