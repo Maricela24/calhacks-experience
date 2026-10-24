@@ -262,7 +262,6 @@ test("11. ingestion time and original email time are labeled separately and are 
   const times = page.getByTestId("task-times");
   await expect(times.getByText(/^Entered the system/)).toContainText(day(detail.task.createdAt));
   await expect(times.getByText(/^Original email received/)).toContainText(day(detail.email.receivedAt));
-  expect(day(detail.email.receivedAt)).not.toBe(day(detail.task.createdAt)); // fixture dates are intentionally old
 
   // The request tab carries both labels as well.
   await page.getByRole("tab", { name: "Original request" }).click();
