@@ -162,3 +162,18 @@ export function whatsappConfigured(c: AppConfig): boolean {
   const w = c.whatsapp;
   return !!(w.twilioAccountSid && w.twilioAuthToken && w.from);
 }
+
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+
+/**
+ * The API listens on API_PORT; the web proxy (apps/web/next.config.mjs) and the demo CLI call API_ORIGIN.
+ * For a loopback origin the two must agree. Returns a human-readable problem, or null when consistent.
+ * Non-loopback origins (e.g. http://api:4000 in Docker Compose) are not checked.
+ */
+export function apiPortMismatch(config: Pick<AppConfig, "apiOrigin" | "apiPort">): string | null {
+  const url = new URL(config.apiOrigin);
+  if (!LOOPBACK.has(url.hostname)) return null;
+  const originPort = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+  if (originPort === config.apiPort) return null;
+  return `API_PORT is ${config.apiPort} but API_ORIGIN points at port ${originPort}; the web proxy and demo CLI would call the wrong port. Set both to the same port.`;
+}

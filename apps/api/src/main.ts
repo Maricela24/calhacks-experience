@@ -1,12 +1,14 @@
-import { bootstrapDb, loadConfig, loadRootEnv } from "@afterhours/data";
+import { apiPortMismatch, bootstrapDb, loadConfig, loadRootEnv } from "@afterhours/data";
 import { buildApp } from "./app";
 
 loadRootEnv();
 const config = loadConfig();
 const db = bootstrapDb(config);
+const portProblem = apiPortMismatch(config);
 const app = await buildApp({ config, db, logger: true });
 
 const host = process.env.API_HOST ?? "127.0.0.1";
+if (portProblem) app.log.warn(portProblem);
 await app.listen({ port: config.apiPort, host });
 
 const stop = async () => {
