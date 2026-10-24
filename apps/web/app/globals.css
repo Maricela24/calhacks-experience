@@ -330,3 +330,11 @@ input:disabled, select:disabled { background: #eef2f6; color: var(--ink-2); }
 .content > *, .stack > *, .stack-sm > *, .card, .panel > *, .block, .doc-page, .preview, .deck, .slide, .slide-body,
 .slide-cols > div, .file-info, .grow, .page-head > *, .card-head > *, .callout > *, .banner > *, .summary > div { min-width: 0; }
 .card-title, .doc-title, h1, h2, h3, h4, .block-text, .block-heading, .file-name, .thumb-title, .summary dd { overflow-wrap: anywhere; }
+
+/* The chart is drawn in a fixed 560x260 box and scaled to the screen, so on a phone its text must be larger in
+   drawing units to stay readable. */
+@media (max-width: 600px) {
+  .chart-tick { font-size: 17px; }
+  .chart-value { font-size: 19px; }
+  .chart-unit { font-size: 17px; }
+}

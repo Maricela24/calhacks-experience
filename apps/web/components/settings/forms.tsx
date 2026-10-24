@@ -64,7 +64,7 @@ export function OrganizationForm({ settings }: { settings: WorkspaceSettings }) 
   return (
     <SettingsSection
       id="org" title="Organization" dirty={dirty} valid={valid} save={save.state}
-      description="This profile is authorized context for preparing work: it can appear in the documents and slides. Do not put secrets here."
+      description="This profile is authorized context for preparing work: it can appear in the documents and slides. Each task keeps the profile it was created with, so saving here changes new requests only. Do not put secrets here."
       onSubmit={() =>
         save.run({
           organization: {

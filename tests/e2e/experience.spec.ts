@@ -378,7 +378,7 @@ test("15. a blocked notification does not hide, disable, or fail the finished wo
     await page.getByRole("tab", { name: /^Notifications/ }).click();
     // The operator has not enabled live WhatsApp in this stack, so the message is blocked, not sent.
     await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText("Blocked", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText(/WHATSAPP_USE_CASE_ELIGIBLE/)).toBeVisible();
+    await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText(/WhatsApp is not configured|WHATSAPP_USE_CASE_ELIGIBLE|not confirmed/).first()).toBeVisible();
     await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText("Delivered", { exact: true })).toHaveCount(0);
     // Files stay downloadable and the task can still be reviewed.
     const docx = await downloadFile(page, /Download .*\.docx/);
@@ -468,4 +468,83 @@ test("19. very long titles, filenames, text and tables wrap on a phone and keep 
   await expect(m.getByRole("heading", { name: "Work queue" })).toBeVisible();
   expect(await m.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await ctx.close();
+});
+
+test("20. offline: actions fail visibly and are never queued to fire on reconnect", async ({ page, context }) => {
+  await needEngine(page);
+  const { taskId } = await inject(page.request, "proposal");
+  await page.goto(`/tasks/${taskId}`);
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
+  await context.setOffline(true);
+  await expect(page.getByText("You are offline.")).toBeVisible();
+  await page.getByRole("button", { name: "Mark reviewed" }).click();
+  await expect(page.getByText(/Could not reach the server/).first()).toBeVisible();
+  await context.setOffline(false);
+  await expect(page.getByText("You are offline.")).toBeHidden();
+  // Wait long enough for any hidden queued request to fire, then prove the task is still unreviewed.
+  await page.waitForTimeout(3000);
+  expect((await taskStatus(page, taskId)).status).toBe("ready");
+  await expect(statusBadge(page, "ready")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark reviewed" })).toBeEnabled();
+});
+
+test("21. a revoked (expired) session on a deep link returns to login, then back to the same task", async ({ browser, page }) => {
+  await login(page);
+  const { taskId } = await inject(page.request, "no_action");
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  // Take a real session, then revoke it on the server while the browser still holds the cookie.
+  const res = await p.request.post(`${BASE}/api/session`, { headers: { origin: new URL(BASE).origin, "content-type": "application/json" }, data: { password: PASSWORD } });
+  expect(res.ok()).toBe(true);
+  const held = await ctx.cookies();
+  expect((await p.request.delete(`${BASE}/api/session`, { headers: { origin: new URL(BASE).origin } })).ok()).toBe(true);
+  await ctx.clearCookies();
+  await ctx.addCookies(held); // the browser still sends the now-revoked token
+  await p.goto(`${BASE}/tasks/${taskId}`);
+  await p.waitForURL(/\/login\?returnTo=/);
+  expect(decodeURIComponent(new URL(p.url()).searchParams.get("returnTo") ?? "")).toBe(`/tasks/${taskId}`);
+  await p.getByLabel("Password").fill(PASSWORD);
+  await p.getByRole("button", { name: "Sign in" }).click();
+  await p.waitForURL(`${BASE}/tasks/${taskId}`);
+  await expect(p.getByRole("heading", { level: 1 })).toBeVisible();
+  await ctx.close();
+});
+
+test("22. quiet hours: files are ready now, the notification shows its planned time in the workspace timezone", async ({ page }) => {
+  await needEngine(page);
+  const origin = new URL(BASE).origin;
+  const patch = (data: unknown) => page.request.patch(`${BASE}/api/settings`, { headers: { origin, "content-type": "application/json" }, data });
+  const current = await (await page.request.get(`${BASE}/api/settings`)).json();
+  const tz: string = current.data.organization.timezone;
+  const hhmm = (offsetMin: number) => {
+    const d = new Date(Date.now() + offsetMin * 60_000);
+    return new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+  };
+  const quiet = { enabled: true, start: hhmm(-30), end: hhmm(90), timezone: tz };
+  const ok = await patch({ notifications: { quietHours: quiet, digestTime: hhmm(180) } });
+  expect(ok.ok(), "quiet hours accepted").toBe(true);
+  try {
+    const { taskId } = await inject(page.request, "proposal");
+    await page.goto(`/tasks/${taskId}`);
+    // Work is not delayed by quiet hours.
+    await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
+    await page.getByRole("tab", { name: /^Notifications/ }).click();
+    const panel = page.locator(".details-tabs").getByRole("tabpanel");
+    await expect(panel.getByText("Queued", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(panel.getByText(/plan, not a promise/)).toBeVisible();
+    await expect(panel.getByText("Currently planned for")).toBeVisible();
+    await expect(panel.getByText("Files prepared")).toBeVisible();
+    // The shown time is the backend's persisted schedule, formatted in the workspace timezone, and it is in the future.
+    const detail = (await (await page.request.get(`${BASE}/api/tasks/${taskId}`)).json()).data;
+    const note = detail.notifications[0];
+    expect(Date.parse(note.scheduledFor)).toBeGreaterThan(Date.now());
+    const shown = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeStyle: "short" }).format(new Date(note.scheduledFor));
+    await expect(panel).toContainText(shown);
+    await expect(panel.getByText("Simulated (outbox)")).toHaveCount(0); // queued is not sent
+    // Review still works while the notification waits.
+    await page.getByRole("button", { name: "Mark reviewed" }).click();
+    await expect(page.getByRole("heading", { name: "Marked reviewed" })).toBeVisible();
+  } finally {
+    await patch({ notifications: { quietHours: { enabled: false, start: "22:00", end: "07:00", timezone: tz }, digestTime: "08:00" } });
+  }
 });

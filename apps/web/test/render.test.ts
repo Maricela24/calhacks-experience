@@ -9,7 +9,7 @@ import { PreviewContext } from "../components/preview/context";
 import { SourceDialog, quoteMatches } from "../components/preview/source-dialog";
 import { safeReturnTo } from "../lib/api";
 import { formatBytes, formatElapsed, isValidTimeZone, normalizeWs } from "../lib/format";
-import { isConfigError, sortForQueue } from "../lib/labels";
+import { describeNotification, isConfigError, sortForQueue } from "../lib/labels";
 
 const render = (block: ContentBlock, sources: SourceDocument[] = []) =>
   renderToStaticMarkup(createElement(PreviewContext.Provider, { value: { sources, openSource: () => undefined } }, createElement(BlockView, { block })));
@@ -145,5 +145,28 @@ describe("helpers", () => {
     expect(out.map((x) => x.id)).toEqual(["3", "4", "5", "2", "1"]);
     expect(isConfigError("MODEL_NOT_CONFIGURED")).toBe(true);
     expect(isConfigError("ENGINE_UNEXPECTED_ERROR")).toBe(false);
+  });
+});
+
+describe("describeNotification (honest delivery wording)", () => {
+  const n = (state: "queued" | "simulated" | "accepted" | "delivered" | "blocked" | "failed", lastError: string | null = null) => describeNotification({ state, lastError, channel: "whatsapp" });
+  it("calls an uncertain failure uncertain, not a rejection, and never offers a resend", () => {
+    const d = n("failed", "DELIVERY_UNCERTAIN: The provider did not answer in time. It may or may not have been accepted.");
+    expect(d.label).toBe("Failed (uncertain)");
+    expect(d.detail).toContain("may have accepted");
+    expect(d.detail).toContain("not resent automatically");
+    expect(d.detail.toLowerCase()).not.toContain("rejected");
+    expect(d.reason).not.toMatch(/^DELIVERY_UNCERTAIN/);
+  });
+  it("explains a policy-changed block as not sent, with the files unaffected", () => {
+    const d = n("blocked", "POLICY_CHANGED: The recipient was edited after this message was queued.");
+    expect(d.label).toBe("Not sent (settings changed)");
+    expect(d.detail).toContain("files are unaffected");
+  });
+  it("keeps simulated, accepted and delivered distinct, and queued is a plan", () => {
+    expect(n("simulated").detail).toContain("not sent to any phone");
+    expect(n("accepted").detail).toContain("not confirmed");
+    expect(n("accepted").label).not.toBe(n("delivered").label);
+    expect(n("queued").detail).toContain("plan, not a promise");
   });
 });

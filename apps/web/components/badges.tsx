@@ -4,7 +4,7 @@ import {
   Inbox, Cpu,
 } from "lucide-react";
 import type { GenerationMode, IngestionMode, NotificationRecord, TaskStatus } from "@afterhours/contracts";
-import { NOTIFICATION_STATE, STATUS_LABEL, isActive } from "@/lib/labels";
+import { STATUS_LABEL, describeNotification, isActive } from "@/lib/labels";
 
 const STATUS_STYLE: Record<TaskStatus, string> = {
   queued: "neutral", planning: "info", running: "info", needs_input: "warn", ready: "good",
@@ -46,12 +46,11 @@ export function GenerationBadge({ mode }: { mode: GenerationMode }) {
   );
 }
 
-const NOTE_STYLE: Record<NotificationRecord["state"], string> = {
-  queued: "neutral", simulated: "demo", accepted: "info", delivered: "good", blocked: "warn", failed: "bad",
-};
-export function NotificationStateBadge({ state }: { state: NotificationRecord["state"] }) {
+export function NotificationStateBadge({ record }: { record: Pick<NotificationRecord, "state" | "lastError" | "channel"> }) {
+  const d = describeNotification(record);
+  const state = record.state;
   const Icon = state === "queued" ? Clock : state === "delivered" ? CheckCircle2 : state === "blocked" ? AlertTriangle : state === "failed" ? XCircle : state === "simulated" ? Inbox : Mail;
-  return <span className={`badge badge-${NOTE_STYLE[state]}`}><Icon size={14} aria-hidden />{NOTIFICATION_STATE[state].label}</span>;
+  return <span className={`badge badge-${d.tone}`}><Icon size={14} aria-hidden />{d.label}</span>;
 }
 
 export { isActive };

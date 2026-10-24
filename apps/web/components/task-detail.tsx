@@ -132,9 +132,21 @@ function ActivityTab({ detail, tz }: { detail: TaskDetail; tz?: string }) {
   );
 }
 
+/** When the files were prepared, from the persisted event written at the ready commit. Null when no such event exists. */
+export function preparedAtOf(detail: TaskDetail): string | null {
+  const ready = sortEvents(detail.events.filter((e) => e.revision === detail.task.revision && e.type === "status" && e.stage === "export")).at(-1);
+  return ready?.createdAt ?? null;
+}
+
 function NotificationsTab({ detail, tz }: { detail: TaskDetail; tz?: string }) {
   if (detail.notifications.length === 0) return <p className="muted">No notification has been created for this task yet.</p>;
-  return <div className="stack-sm">{detail.notifications.map((n) => <NotificationRow key={n.id} record={n} timeZone={tz} />)}</div>;
+  const preparedAt = ["ready", "approved", "dismissed"].includes(detail.task.status) ? preparedAtOf(detail) : undefined;
+  return (
+    <div className="stack-sm">
+      <p className="muted small">Preparing the files and notifying you are separate. A notification problem never removes the files above.</p>
+      {detail.notifications.map((n) => <NotificationRow key={n.id} record={n} timeZone={tz} preparedAt={preparedAt} />)}
+    </div>
+  );
 }
 
 function ActiveProgress({ detail, tz }: { detail: TaskDetail; tz?: string }) {

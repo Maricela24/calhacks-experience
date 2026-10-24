@@ -1,9 +1,9 @@
 "use client";
-import { createContext, useContext, useEffect, type MouseEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Bell, FlaskConical, Inbox, LogOut, Settings, Cpu, Mail } from "lucide-react";
+import { AlertTriangle, Bell, FlaskConical, Inbox, LogOut, Settings, Cpu, Mail, WifiOff } from "lucide-react";
 import type { IntegrationStatus } from "@afterhours/contracts";
 import { api, describeError } from "@/lib/api";
 import { useIntegrations, useSession } from "@/lib/hooks";
@@ -51,6 +51,20 @@ export function ModeBadge({ integrations }: { integrations: IntegrationStatus | 
   );
 }
 
+/** Browser connectivity. Display only: it never triggers work, and reconnecting simply lets the normal refresh run. */
+function useOnline(): boolean {
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    setOnline(navigator.onLine);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+  return online;
+}
+
 export function AppShell({ demoEnabled, children }: { demoEnabled: boolean; children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -58,6 +72,7 @@ export function AppShell({ demoEnabled, children }: { demoEnabled: boolean; chil
   const toast = useToast();
   const guard = useGuard();
   const session = useSession();
+  const online = useOnline();
   const authed = session.data?.authenticated === true;
   const integrationsQuery = useIntegrations(authed);
 
@@ -147,6 +162,15 @@ export function AppShell({ demoEnabled, children }: { demoEnabled: boolean; chil
               )}
             </div>
           </header>
+
+          {!online && (
+            <div className="banner banner-warn" role="status">
+              <WifiOff size={18} aria-hidden />
+              <div>
+                <strong>You are offline.</strong> What you see may be out of date, and actions will fail until you are back online. Work on the server keeps running without this page.
+              </div>
+            </div>
+          )}
 
           {integrations && !integrations.worker.healthy && (
             <div className="banner banner-warn" role="status">

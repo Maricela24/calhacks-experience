@@ -81,6 +81,8 @@ export function Providers({ children }: { children: ReactNode }) {
     () =>
       new QueryClient({
         defaultOptions: {
+          // A click made while offline must fail visibly now, not sit in a hidden queue and fire on reconnect.
+          mutations: { networkMode: "always" },
           queries: {
             retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
             refetchOnWindowFocus: true,
