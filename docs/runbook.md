@@ -10,6 +10,20 @@ pnpm dev
 `setup:local` is idempotent: it never overwrites an existing value in `.env`. The login password is
 `APP_PASSWORD` in `.env`.
 
+## Release candidate (Batch 6)
+
+The tested candidate, versions and command ledger are in `docs/release/candidate.md`; what is real, simulated, blocked or not
+run is in `docs/release/capability-matrix.md`; the allowed claims, limits, fallback and the rehearsed demo are in
+`docs/release/status.md`. Two ways to run it were exercised:
+
+- **Source dev:** `pnpm dev` (`[web]`, `[api]`, `[worker]` prefixes) then `pnpm demo:proposal` / `pnpm demo:report` or the UI buttons.
+- **Built runtime (what the compose file runs):** `pnpm build` (set `API_ORIGIN` to the API's real address first: Next bakes the
+  `/api` rewrite at build time), then `node --import tsx apps/api/src/main.ts`, `node --import tsx apps/worker/src/main.ts` and
+  `pnpm --filter @afterhours/web start`.
+
+If port 4000 is taken by another program, set `API_PORT` and `API_ORIGIN` together (`pnpm check:ready` fails when they
+disagree). Never stop a process you did not start. Reloading a task page always shows the stored state.
+
 ## Modes — always disclosed in the UI and status endpoint
 
 - `GENERATION_MODE=fixture` (default): Person 2's fixture intelligence. Disclose as fixture output.

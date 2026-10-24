@@ -8,7 +8,7 @@ Nothing here is a production-readiness or overnight-trial claim. No branch was m
 | Part | Source |
 |---|---|
 | Platform | `platform-batch5` @ `9bfd28b` (code `0af9ff3`, `56977d6`; tests/docs `9bfd28b`) on `platform-batch4` @ `af24fef` |
-| Engine | `origin/person-2-engine` @ `de6bd40` (fetched 2026-10-23), merged **uncommitted** into a scratch worktree (clean merge, no conflicts, lockfile unchanged) |
+| Engine | `origin/person-2-engine` @ `de6bd40` (fetched 2026-10-23), merged **uncommitted** into a scratch worktree (clean merge, no conflicts; the lockfile is the merge result of the engine branch's changes, with no manual edit) |
 | Experience | Darren's SpaceXAI UI: the **uncommitted** working tree of the `ui/spacexai-style` checkout, copied into the scratch tree. There is still no experience branch from Maricella, so no teammate-owned UI was tested. |
 | Mode | demo ingestion, fixture intelligence (real engine code, fixture scenario), outbox notifications |
 | Not present | Gmail, a live model, WhatsApp, Docker, a remote host |
