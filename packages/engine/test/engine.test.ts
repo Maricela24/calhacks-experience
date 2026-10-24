@@ -195,3 +195,22 @@ describe("live configuration", () => {
     process.env.MODEL_PROVIDER = previous.provider; process.env.MODEL_NAME = previous.model; process.env.OPENAI_API_KEY = previous.key;
   });
 });
+
+describe("DOCX tables have a real grid (release defect DEF-4)", () => {
+  it("every table declares a fixed layout and grid columns wide enough to hold text, for proposal and report", async () => {
+    for (const scenario of ["proposal", "report"] as const) {
+      const result = await runWork(await inputFor(scenario), deps());
+      if (result.outcome !== "ready") throw new Error(`${scenario} did not produce files`);
+      const xml = Buffer.from(unzip(result.files.find((file) => file.format === "docx")!.bytes).get("word/document.xml")!).toString("utf8");
+      const tables = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g) ?? [];
+      expect(tables.length).toBeGreaterThan(0);
+      for (const table of tables) {
+        const grid = [...table.matchAll(/<w:gridCol w:w="(\d+)"/g)].map((m) => Number(m[1]));
+        expect(grid.length).toBeGreaterThan(0);
+        expect(Math.min(...grid)).toBeGreaterThanOrEqual(500);
+        expect(table).toMatch(/<w:tblLayout w:type="fixed"/);
+        expect(grid.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(9000);
+      }
+    }
+  });
+});

@@ -1,4 +1,4 @@
-import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
+import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun, WidthType } from "docx";
 import type { ContentBlock, SourceDocument, WorkProduct } from "@afterhours/contracts";
 import { EngineError } from "../errors";
 
@@ -7,20 +7,30 @@ function para(text: string, options: { bold?: boolean; heading?: typeof HeadingL
   return new Paragraph({ heading: options.heading, pageBreakBefore: options.pageBreakBefore, bullet: options.bullet ? { level: 0 } : undefined, spacing: { after: 140, line: 276 }, children: [new TextRun({ text: clean(text), bold: options.bold })] });
 }
 
+/** Fixed grid: the table's total width is split evenly. Without an explicit grid, Word/Quick Look collapse columns to a character wide. */
+const TABLE_WIDTH_DXA = 9000;
+const gridOf = (columns: number): number[] => Array.from({ length: Math.max(columns, 1) }, () => Math.floor(TABLE_WIDTH_DXA / Math.max(columns, 1)));
+const fixedTable = (columns: number, rows: TableRow[]): Table =>
+  new Table({ width: { size: TABLE_WIDTH_DXA, type: WidthType.DXA }, columnWidths: gridOf(columns), layout: TableLayoutType.FIXED, rows });
+const cellOf = (columns: number, text: string, bold = false): TableCell =>
+  new TableCell({ width: { size: gridOf(columns)[0]!, type: WidthType.DXA }, margins: { top: 100, bottom: 100, left: 100, right: 100 }, children: [para(text, { bold })] });
+
 function blockNodes(block: ContentBlock): Array<Paragraph | Table> {
   const nodes: Array<Paragraph | Table> = [];
   if (block.heading) nodes.push(para(block.heading, { heading: HeadingLevel.HEADING_2, pageBreakBefore: block.heading === "Timeline and fee" || block.heading === "Assumptions and unknowns" }));
   if (block.kind === "paragraph" && block.text) nodes.push(para(block.text));
   if (block.kind === "bullets") nodes.push(...block.items.map((item) => para(item, { bullet: true })));
   if (block.kind === "table") {
-    const rows = [block.columns, ...block.rows].map((cells, rowIndex) => new TableRow({ children: cells.map((cell) => new TableCell({ width: { size: Math.floor(9000 / Math.max(cells.length, 1)), type: WidthType.DXA }, margins: { top: 100, bottom: 100, left: 100, right: 100 }, children: [para(cell, { bold: rowIndex === 0 })] })) }));
-    nodes.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
+    const cols = Math.max(block.columns.length, ...block.rows.map((r) => r.length), 1);
+    const rows = [block.columns, ...block.rows].map((cells, rowIndex) => new TableRow({ children: cells.map((cell) => cellOf(cols, cell, rowIndex === 0)) }));
+    nodes.push(fixedTable(cols, rows));
   }
   if (block.kind === "chart" && block.chart) {
-    nodes.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [
-      new TableRow({ children: [new TableCell({ children: [para("Series", { bold: true })] }), ...block.chart.labels.map((label) => new TableCell({ children: [para(label, { bold: true })] }))] }),
-      ...block.chart.series.map((series) => new TableRow({ children: [new TableCell({ children: [para(series.name)] }), ...series.values.map((value) => new TableCell({ children: [para(String(value))] }))] })),
-    ] }));
+    const cols = block.chart.labels.length + 1;
+    nodes.push(fixedTable(cols, [
+      new TableRow({ children: [cellOf(cols, "Series", true), ...block.chart.labels.map((label) => cellOf(cols, label, true))] }),
+      ...block.chart.series.map((series) => new TableRow({ children: [cellOf(cols, series.name), ...series.values.map((value) => cellOf(cols, String(value)))] })),
+    ]));
   }
   return nodes;
 }
