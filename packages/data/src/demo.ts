@@ -51,7 +51,12 @@ export function loadDemoFixture(root: string, scenario: FixtureScenario) {
   return { fixture: fx, attachments };
 }
 
-/** Inject a demo email through the same ingestion path as Gmail. replayKey makes it idempotent. */
+/**
+ * Inject a demo email through the same ingestion path as Gmail. replayKey makes it idempotent.
+ *
+ * The fixture's own `receivedAt` is preserved so date interpretation ("next Monday") is deterministic across
+ * runs. Ingestion time is recorded separately as the task/intake `created_at` (TaskSummary.createdAt).
+ */
 export function injectDemo(
   db: Db, config: Pick<AppConfig, "repoRoot" | "generationMode">,
   scenario: FixtureScenario, replayKey: string | undefined, now: Date,
@@ -62,7 +67,7 @@ export function injectDemo(
     sourceKey: providerMessageId,
     mode: "demo",
     integrationId: null,
-    envelope: { ...fixture.email, providerMessageId, receivedAt: now.toISOString() },
+    envelope: { ...fixture.email, providerMessageId },
     attachments,
     generationMode: config.generationMode,
     fixtureScenario: scenario,

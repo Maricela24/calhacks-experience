@@ -43,6 +43,27 @@ users can connect. A successful test connection is **not** Google production ver
 | `503 GMAIL_NOT_CONFIGURED` | Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. |
 | Mail ignored | Sender not in allowed senders (exact match), automation disabled, or message older than the connection. |
 
+## Using a different API port locally
+
+Port 4000 may be taken by another project. Three things read the API address and they must agree:
+
+| Reader | Variable |
+|---|---|
+| API (`apps/api`) listens on | `API_PORT` |
+| Web proxy (`apps/web/next.config.mjs`, `/api/*` → `/v1/*`) calls | `API_ORIGIN` |
+| Demo CLI (`pnpm demo:proposal`, `demo:report`) calls | `API_ORIGIN` |
+
+Set both to the same port. Use either your own untracked `.env` (git-ignored) or shell variables; never edit `.env.example` for a machine-specific port. Example with port 4177 and a throwaway database, using only shell variables:
+
+```bash
+export API_PORT=4177 API_ORIGIN=http://127.0.0.1:4177
+export DATABASE_PATH=/tmp/ah-scratch/db.sqlite ARTIFACTS_DIR=/tmp/ah-scratch/artifacts
+pnpm check:ready   # fails with "API_PORT matches API_ORIGIN" if the two disagree
+pnpm dev
+```
+
+Shell variables win over `.env` values. If `API_ORIGIN` is left unset the default is port 4000 everywhere, so setting only `API_PORT` is a mismatch: `pnpm check:ready` fails and the API logs a warning at startup. Non-loopback origins (Docker Compose uses `http://api:4000`) are not checked. Verified together on 4177 for the API, the web proxy on port 3000 and the demo CLI (see `docs/batches/batch-2/darren.md`).
+
 ## Worker behaviour
 
 - One engine job at a time; 90 s lease renewed every 15 s; 240 s hard deadline; at most 2 automatic attempts per
