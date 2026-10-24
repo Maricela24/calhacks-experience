@@ -14,6 +14,7 @@ export * from "./queries";
 export * from "./schedule";
 export * from "./notifications";
 export * from "./artifacts";
+export * from "./backup";
 export * from "./engineResult";
 export * from "./integrations";
 export * from "./demo";
