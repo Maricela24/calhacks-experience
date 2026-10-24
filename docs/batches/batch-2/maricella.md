@@ -6,7 +6,11 @@ Base/foundation commit: `5d8f342`. Merged `origin/platform` at `b442c71` (includ
 Implementation commit or working-tree status: code and report at `84a372e` on `experience` (parent `691c3cd`, the merge of `platform` `b442c71`). Committed locally; **NOT PUSHED** (GitHub returned 403: Claude lacks access to the org repo).
 Scope implemented: the Batch 2 user flow in `apps/web` (login with safe `returnTo`, queue, demo injection, task detail with persisted progress, structured previews, verified downloads, "Mark reviewed", notifications history, settings status), `packages/delivery` outbox/composition (also the Twilio adapter, blocked unless configured and eligible), and `tests/e2e`. Batch 3 prompt was read and **not started**: the Batch 2 gate is not recorded.
 
-## Gate status: BLOCKED on Joanne's engine
+## Gate status: web side PASSES against the real engine locally (see Update 2); official gate still waits for Darren's merge
+
+_The sections below were written when the engine was missing. Update 2 at the end supersedes the BLOCKED answers._
+
+## Original status (before the engine arrived): BLOCKED on Joanne's engine
 
 `git ls-remote origin` lists only `main`, `platform`, and my pushed `experience` (when push is possible). There is no `engine`
 branch, so `@afterhours/engine` is still the foundation stub and every task ends `failed / ENGINE_NOT_IMPLEMENTED`. No real
@@ -84,3 +88,37 @@ Runner: `scripts/e2e.mjs` (temp DB/artifacts, ports 3100/4100, exit 3 = BLOCKED)
 - Darren: merge `experience` after `engine`; rerun `pnpm test:e2e`; regenerate the lockfile if you rebase.
 
 Suggested integrated gate status: **BLOCKED**.
+
+
+---
+
+## Update 2 — verified against Joanne's real engine (local integration, not yet merged on origin)
+
+Candidate: local branch `verify-integration` = `experience` + `origin/platform` `aaed3db` + `origin/person-2-engine` `a45bd5a`. Only conflict was `pnpm-lock.yaml`; resolved by taking ours and running `pnpm install` (+26/-1 packages, from the engine's dependencies). Darren should redo the merge on his side and regenerate the lockfile himself. This local branch is not pushed. One test fix is on `experience`: e2e 11 no longer assumes the fixture's `receivedAt` differs from the ingestion day (Joanne's fixture is `2026-10-23T19:00Z`, the same calendar day as this machine's clock). The labels and values are still checked against the API.
+
+| Command | Exit | Result |
+|---|---|---|
+| `pnpm typecheck && pnpm lint && pnpm test && pnpm build` | 0 | 13 files, **139 tests** pass; `next build` ok |
+| `pnpm test:e2e` (real API + real worker + **real engine**, temp DB) | **0** | 12 passed, 1 skipped (stub-failure test, not applicable with a real engine); nothing BLOCKED |
+| Real-file run: demo inject proposal and report, download all four files | 0 | below |
+| LibreOffice headless `--convert-to pdf` on all four files | 0 | below |
+
+Real tasks (temp DB, `generationMode: fixture`, `ingestionMode: demo`, revision 1, status `ready`):
+- proposal task `cb0c5b95-abdb-42a1-892d-54c09b540887`: `Maple-Moss-Launch-Strategy-Proposal-r1.docx` 10191 B; `Maple-Moss-Kickoff-Deck-r1.pptx` 92951 B.
+- report task `35295546-e5a4-4a89-aa02-709a710d810b`: `January-February-Sales-Performance-Report-r1.docx` 9833 B; `January-February-Sales-Update-r1.pptx` 109913 B.
+- For all four: HTTP 200 with the exact Office MIME type, downloaded size and SHA-256 equal the artifact manifest.
+- LibreOffice opened all four: proposal deck 5 pages (slides), proposal 3 pages, report deck 5 slides, report 2 pages. I looked at the rendered proposal deck and first proposal page: readable, teal accent, "USD 6,000" on the fee slide. This shows the files open and lay out sensibly in LibreOffice; it is **not** a check in Microsoft Word or PowerPoint (NOT RUN).
+
+Changed answers to the Batch 2 role questions (all on the local integration candidate above):
+- Q3 injection/real task: **PASS** (ids above, and e2e 1/2/6/8/9/12 inject through the API and the engine produces ready tasks).
+- Q4 progress/worker stopped: **PASS** (real events from the real engine in e2e 1; worker-stopped behaviour was shown earlier).
+- Q5 previews from the same content as the files: **PASS** for the proposal: e2e 1 compares the preview's proposal title and all five slide titles with the text inside the downloaded DOCX/PPTX.
+- Q6 two real Office downloads: **PASS** with the checks above (MIME, hash, size, ZIP parts, five slide parts, title and "6,000" text) plus LibreOffice conversion.
+- Q7 review persistence and stale 409: **PASS** (e2e 1 reload; e2e 8 forced stale revision; API stays `ready`).
+- Q9 outbox: **PASS** end to end (e2e 6 shows "Simulated (outbox)", never Delivered/Accepted).
+- Q11 mobile/keyboard: **PASS** on real tasks (e2e 9 and 12).
+- Q14 commands/real engine: **PASS**, see table.
+- Q10 failed-notification UI: still NOT RUN.
+- Q15 remaining: Darren's merge into an integration branch on origin and his own rerun; Word/PowerPoint opening; the report numbers (12,000 / 15,000 / 3,000 / 25%) were asserted by e2e 2 against the real engine and passed.
+
+Suggested integrated gate status for the web side: **PASS on the local candidate**; the official team gate is Darren's to record after he merges `person-2-engine` and `experience`.

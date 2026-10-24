@@ -72,6 +72,10 @@ missing. That is never a pass.
   the task reached ready (scratch engine).
 - Desktop 1440 px and phone 390 px screenshots inspected manually; no horizontal overflow (asserted in test 9).
 
+## Update: real engine (local integration)
+
+With `experience` + `platform` `aaed3db` + `person-2-engine` `a45bd5a` merged locally: 139 unit tests, typecheck, lint, build pass and `pnpm test:e2e` exits 0 (12 passed, 1 not applicable). Details and file evidence: `docs/batches/batch-2/maricella.md`, Update 2. Downloaded files were opened by LibreOffice, not Word/PowerPoint.
+
 ## Not verified / remaining
 
 - Real engine output (Joanne), live model, live Gmail, live WhatsApp: none exercised from the UI.
