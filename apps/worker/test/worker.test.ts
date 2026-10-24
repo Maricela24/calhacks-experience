@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DeliveryInput, EngineDependencies, EngineInput, EngineResult } from "@afterhours/contracts";
 import { getTaskDetail, getTaskSummary, injectDemo, loadDemoFixture, openDb, recoverExpiredJobs, type AppConfig, type Db } from "@afterhours/data";
 import { injectTask, makeTestConfig, makeTestDb, readyResult, testPlan, testSources } from "@afterhours/data/testing";
-import { runWork as stubRunWork } from "@afterhours/engine";
+import { runWork } from "@afterhours/engine";
 import { sendNotification as stubSend } from "@afterhours/delivery";
 import { createWorker, type WorkerDeps } from "../src/worker";
 
@@ -70,13 +70,16 @@ describe("worker job execution", () => {
     expect(seen!.organization.timezone).toBe("America/Los_Angeles");
   });
 
-  it("the foundation engine stub fails honestly (no fake ready work)", async () => {
-    const { db, config, worker } = make(stubRunWork);
+  it("runs the real fixture engine through the worker and publishes both Office files", async () => {
+    const { db, config, worker } = make(runWork);
     const taskId = injectTask(db, config, "k", new Date());
     await worker.processNextJob();
-    expect(getTaskSummary(db, taskId)).toMatchObject({ status: "failed", error: { code: "ENGINE_NOT_IMPLEMENTED", retryable: false } });
-    expect(getTaskDetail(db, taskId).artifacts).toHaveLength(0);
-  });
+    expect(getTaskSummary(db, taskId)).toMatchObject({ status: "ready", artifactCount: 2, error: null });
+    const detail = getTaskDetail(db, taskId);
+    expect(detail.artifacts.map((artifact) => artifact.format).sort()).toEqual(["docx", "pptx"]);
+    expect(detail.products.find((product) => product.kind === "presentation")?.slides).toHaveLength(5);
+    expect(detail.plan?.dueAt).toBe("2026-10-26T16:00:00.000Z");
+  }, 20_000);
 
   it("retries a transient provider error once, then reports an actionable failure", async () => {
     let calls = 0;

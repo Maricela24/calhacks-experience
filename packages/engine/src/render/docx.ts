@@ -1,8 +1,8 @@
-import { AlignmentType, BorderStyle, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
+import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import type { ContentBlock, SourceDocument, WorkProduct } from "@afterhours/contracts";
 import { EngineError } from "../errors";
 
-function clean(value: string): string { return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ""); }
+function clean(value: string): string { return [...value].filter((character) => { const code = character.charCodeAt(0); return code >= 32 || code === 9 || code === 10 || code === 13; }).join(""); }
 function para(text: string, options: { bold?: boolean; heading?: typeof HeadingLevel[keyof typeof HeadingLevel]; bullet?: boolean; pageBreakBefore?: boolean } = {}): Paragraph {
   return new Paragraph({ heading: options.heading, pageBreakBefore: options.pageBreakBefore, bullet: options.bullet ? { level: 0 } : undefined, spacing: { after: 140, line: 276 }, children: [new TextRun({ text: clean(text), bold: options.bold })] });
 }
