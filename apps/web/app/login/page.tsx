@@ -2,6 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { ApiError, api } from "../lib/api";
+import { safeNext } from "../lib/next";
 import { Badge, Notice } from "../components/ui";
 
 export default function Login() {
@@ -16,7 +17,7 @@ export default function Login() {
     setError(null);
     try {
       await api("/session", { method: "POST", body: { password } });
-      router.replace("/");
+      router.replace(safeNext(new URLSearchParams(window.location.search).get("next")));
     } catch (err) {
       setError(err instanceof ApiError && err.status === 401 ? "That password is not correct." :
         err instanceof ApiError && err.status === 429 ? "Too many attempts. Wait a moment and try again." :

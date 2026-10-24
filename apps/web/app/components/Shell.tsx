@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import type { IntegrationStatus } from "@afterhours/contracts";
 import { api } from "../lib/api";
+import { loginUrlFor, safeNext } from "../lib/next";
 import { useResource } from "../lib/useResource";
 
 export function Mark() {
@@ -42,8 +43,8 @@ export function Shell({ children }: { children: ReactNode }) {
       .then((s) => {
         if (!alive) return;
         setAuthed(s.authenticated);
-        if (!s.authenticated && !onLogin) router.replace("/login");
-        if (s.authenticated && onLogin) router.replace("/");
+        if (!s.authenticated && !onLogin) router.replace(loginUrlFor(path, window.location.search));
+        if (s.authenticated && onLogin) router.replace(safeNext(new URLSearchParams(window.location.search).get("next")));
       })
       .catch(() => alive && setAuthed(false));
     return () => { alive = false; };
