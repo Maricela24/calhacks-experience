@@ -3,7 +3,7 @@
 Batch and owner: Batch 3, Maricella / Person 3 (three-person team; the Eden/QA coordination text in the four-person prompt is superseded, so questions 10 and 11 of that list are marked not applicable).
 Branch: `experience-batch3` (pushed to the `maricela24/calhacks-experience` fork; Joanne's repo has no push access from this session).
 Base: `experience` `629830b` (Batch 2). Candidate tested locally on `verify-integration` = `experience` + `origin/platform` `aaed3db` (Darren Batch 3) + `origin/person-2-engine` `de6bd40` (Joanne). That merge is a local test branch and is **not** pushed; Darren owns the real integration merge and the lockfile.
-Implementation commit: see the last line of this file.
+Implementation commit: `88d80e4` on `experience-batch3` (parent `629830b`). Same content was tested as `9f21650` on the local integration candidate. Pushed to the fork `maricela24/calhacks-experience`.
 Not started: Batch 4 and 5 work (their prompts were read only).
 
 ## Scope implemented (web, tests, docs only)
