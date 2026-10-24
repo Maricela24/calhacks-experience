@@ -1,37 +1,30 @@
-// FOUNDATION STUB — owned by Person 3. Replace this file's contents (keep the exports).
-// Outbox returns an explicitly simulated result. Live WhatsApp is always blocked here.
+// Notification composition and provider adapter (Person 3). Server-only: never import this from apps/web.
 import type { DeliveryInput, DeliveryResult } from "@afterhours/contracts";
+import { composeNotification } from "./compose";
+import { DeliveryError } from "./errors";
+import { sendWhatsApp, type DeliveryDeps } from "./whatsapp";
 
 export type { DeliveryInput, DeliveryResult };
+export { DeliveryError, redact } from "./errors";
+export { composeNotification, safeTitle } from "./compose";
+export { toWhatsAppAddress, type DeliveryDeps, type MessagingClient } from "./whatsapp";
 
-export class DeliveryError extends Error {
-  code: string;
-  retryable: boolean;
-  constructor(code: string, message: string, retryable = false) {
-    super(message);
-    this.name = "DeliveryError";
-    this.code = code;
-    this.retryable = retryable;
-  }
-}
-
-export function composeNotification(input: DeliveryInput): string {
-  const n = input.tasks.length;
-  const first = input.tasks[0];
-  if (n === 1 && first) {
-    return `Ready for review: "${first.title}" (${first.artifactCount} file${first.artifactCount === 1 ? "" : "s"}). ${input.publicAppUrl}/tasks/${first.id}`;
-  }
-  return `${n} results ready for review. ${input.publicAppUrl}/`;
-}
-
-export async function sendNotification(input: DeliveryInput): Promise<DeliveryResult> {
+/**
+ * Outbox: composes the exact message and returns `simulated` with no network request.
+ * WhatsApp: official Twilio API only; returns `blocked` (never throws) when eligibility, configuration,
+ * recipient, window, or template is missing. `accepted` means provider acceptance, not delivery.
+ * The optional second argument exists for tests.
+ */
+export async function sendNotification(input: DeliveryInput, deps?: DeliveryDeps): Promise<DeliveryResult> {
   if (input.channel === "outbox") {
-    return { state: "simulated", message: composeNotification(input), providerMessageId: null, reason: null };
+    try {
+      return { state: "simulated", message: composeNotification(input), providerMessageId: null, reason: null };
+    } catch (err) {
+      if (err instanceof DeliveryError && err.code === "DELIVERY_CONFIG") {
+        return { state: "blocked", message: "Notification text could not be composed.", providerMessageId: null, reason: err.message };
+      }
+      throw err;
+    }
   }
-  return {
-    state: "blocked",
-    message: composeNotification(input),
-    providerMessageId: null,
-    reason: "Live WhatsApp delivery is not implemented in the foundation stub.",
-  };
+  return sendWhatsApp(input, deps);
 }
