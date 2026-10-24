@@ -1,46 +1,126 @@
-import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
-import type { ContentBlock, SourceDocument, WorkProduct } from "@afterhours/contracts";
+import { AlignmentType, BorderStyle, Document, Footer, Header, HeadingLevel, Packer, PageNumber, Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun, WidthType } from "docx";
+import type { ContentBlock, OrganizationProfile, SourceDocument, WorkProduct } from "@afterhours/contracts";
+import { usd } from "../calculations";
 import { EngineError } from "../errors";
+import { officeText, shorten } from "../text";
 
-function clean(value: string): string { return [...value].filter((character) => { const code = character.charCodeAt(0); return code >= 32 || code === 9 || code === 10 || code === 13; }).join(""); }
-function para(text: string, options: { bold?: boolean; heading?: typeof HeadingLevel[keyof typeof HeadingLevel]; bullet?: boolean; pageBreakBefore?: boolean } = {}): Paragraph {
-  return new Paragraph({ heading: options.heading, pageBreakBefore: options.pageBreakBefore, bullet: options.bullet ? { level: 0 } : undefined, spacing: { after: 140, line: 276 }, children: [new TextRun({ text: clean(text), bold: options.bold })] });
+/** A4 with 0.75" margins: 11906 - 2 * 1080 twips of usable width. */
+const MARGIN = 1080;
+const CONTENT_WIDTH = 11906 - 2 * MARGIN;
+const MUTED = "627D98";
+const hex = (value: string) => value.replace(/^#/, "").toUpperCase();
+
+interface RunOptions { bold?: boolean; italics?: boolean; size?: number; color?: string }
+const run = (text: string, options: RunOptions = {}) => new TextRun({ text: officeText(text), ...options });
+
+function para(text: string, options: RunOptions & { heading?: typeof HeadingLevel[keyof typeof HeadingLevel]; bullet?: boolean; keepNext?: boolean; after?: number } = {}): Paragraph {
+  const { heading, bullet, keepNext, after, ...runOptions } = options;
+  return new Paragraph({ heading, keepNext: keepNext ?? Boolean(heading), keepLines: Boolean(heading), bullet: bullet ? { level: 0 } : undefined, spacing: { after: after ?? 120, line: 276 }, children: [run(text, runOptions)] });
 }
 
-function blockNodes(block: ContentBlock): Array<Paragraph | Table> {
+/** Column widths proportional to the longest cell text, with a floor so no column collapses. */
+export function columnWidths(rows: string[][], total = CONTENT_WIDTH): number[] {
+  const columns = Math.max(...rows.map((row) => row.length), 1);
+  const weights = Array.from({ length: columns }, (_, index) => Math.min(60, Math.max(6, ...rows.map((row) => (row[index] ?? "").length))));
+  const floor = Math.floor(total * Math.min(0.12, 1 / columns));
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const raw = weights.map((weight) => Math.max(floor, Math.round((weight / sum) * total)));
+  const scale = total / raw.reduce((a, b) => a + b, 0);
+  const widths = raw.map((value) => Math.floor(value * scale));
+  widths[widths.length - 1]! += total - widths.reduce((a, b) => a + b, 0);
+  return widths;
+}
+
+function grid(header: string[], body: string[][], primary: string): Table {
+  const widths = columnWidths([header, ...body]);
+  const border = { style: BorderStyle.SINGLE, size: 4, color: "BCCCDC" };
+  const cell = (text: string, index: number, isHeader: boolean) => new TableCell({
+    width: { size: widths[index]!, type: WidthType.DXA },
+    margins: { top: 80, bottom: 80, left: 110, right: 110 },
+    shading: isHeader ? { fill: "E6EEF5", color: "auto" } : undefined,
+    borders: { top: border, bottom: border, left: border, right: border },
+    children: [new Paragraph({ spacing: { after: 0, line: 260 }, children: [run(text, { bold: isHeader, color: isHeader ? primary : undefined, size: 20 })] })],
+  });
+  return new Table({
+    layout: TableLayoutType.FIXED, columnWidths: widths, width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+    rows: [
+      new TableRow({ tableHeader: true, cantSplit: true, children: header.map((text, index) => cell(text, index, true)) }),
+      ...body.map((cells) => new TableRow({ cantSplit: true, children: cells.map((text, index) => cell(text, index, false)) })),
+    ],
+  });
+}
+
+function basisNote(block: ContentBlock, organization: OrganizationProfile, sourceTitles: Map<string, string>): string {
+  const cited = [...new Set(block.evidence.map((item) => sourceTitles.get(item.sourceId)).filter(Boolean))].join("; ");
+  if (block.basis === "recommendation") return `Recommendation from ${organization.name}; not stated in the sources.`;
+  if (block.basis === "assumption") return "Assumptions and open items; confirm before any agreement.";
+  if (block.basis === "calculated") return `Calculated in code from ${cited || "the supplied data"}.`;
+  return `Source: ${cited || "supplied context"}.`;
+}
+
+function chartValue(value: number, unit: string | null): string {
+  return unit === "USD" ? usd(Math.round(value * 100)) : `${value.toLocaleString("en-US")}${unit ? ` ${unit}` : ""}`;
+}
+
+function blockNodes(block: ContentBlock, organization: OrganizationProfile, sourceTitles: Map<string, string>): Array<Paragraph | Table> {
+  const primary = hex(organization.brand.primaryColor);
   const nodes: Array<Paragraph | Table> = [];
-  if (block.heading) nodes.push(para(block.heading, { heading: HeadingLevel.HEADING_2, pageBreakBefore: block.heading === "Timeline and fee" || block.heading === "Assumptions and unknowns" }));
+  if (block.heading) nodes.push(para(block.heading, { heading: HeadingLevel.HEADING_1, color: primary, bold: true, size: 28, after: 60 }));
+  nodes.push(para(basisNote(block, organization, sourceTitles), { italics: true, size: 18, color: MUTED, keepNext: true, after: 100 }));
   if (block.kind === "paragraph" && block.text) nodes.push(para(block.text));
-  if (block.kind === "bullets") nodes.push(...block.items.map((item) => para(item, { bullet: true })));
-  if (block.kind === "table") {
-    const rows = [block.columns, ...block.rows].map((cells, rowIndex) => new TableRow({ children: cells.map((cell) => new TableCell({ width: { size: Math.floor(9000 / Math.max(cells.length, 1)), type: WidthType.DXA }, margins: { top: 100, bottom: 100, left: 100, right: 100 }, children: [para(cell, { bold: rowIndex === 0 })] })) }));
-    nodes.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
-  }
+  if (block.kind === "bullets") nodes.push(...block.items.map((item, index) => para(item, { bullet: true, keepNext: index < block.items.length - 1 && block.items.length <= 4, after: 80 })));
+  if (block.kind === "table") nodes.push(grid(block.columns, block.rows, primary), para("", { after: 120 }));
   if (block.kind === "chart" && block.chart) {
-    nodes.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [
-      new TableRow({ children: [new TableCell({ children: [para("Series", { bold: true })] }), ...block.chart.labels.map((label) => new TableCell({ children: [para(label, { bold: true })] }))] }),
-      ...block.chart.series.map((series) => new TableRow({ children: [new TableCell({ children: [para(series.name)] }), ...series.values.map((value) => new TableCell({ children: [para(String(value))] }))] })),
-    ] }));
+    const chart = block.chart;
+    nodes.push(grid(["Series", ...chart.labels], chart.series.map((series) => [series.name, ...series.values.map((value) => chartValue(value, chart.unit))]), primary));
+    nodes.push(para("Chart data. The presentation contains the matching native, editable chart.", { italics: true, size: 18, color: MUTED }));
   }
   return nodes;
 }
 
-export async function renderDocx(product: WorkProduct, sources: SourceDocument[], font: string): Promise<Uint8Array> {
+function sourceNotes(product: WorkProduct, sources: SourceDocument[]): Paragraph[] {
+  const blocks = [...product.blocks, ...product.slides.flatMap((slide) => slide.blocks)];
+  const cited = new Map<string, Set<string>>();
+  for (const block of blocks) for (const evidence of block.evidence) {
+    const notes = cited.get(evidence.sourceId) ?? new Set<string>();
+    if (evidence.quote) notes.add(`“${shorten(evidence.quote, 220)}”`);
+    if (evidence.locator) notes.add(evidence.locator);
+    cited.set(evidence.sourceId, notes);
+  }
+  return sources.filter((source) => source.extractionStatus === "complete" && cited.has(source.id)).flatMap((source) => [
+    para(`${source.title}${source.filename ? ` (${source.filename})` : ""} — ${source.kind.replace("_", " ")}`, { bullet: true, bold: true, after: 40 }),
+    ...[...cited.get(source.id)!].slice(0, 6).map((note) => para(note, { italics: true, size: 18, color: MUTED, after: 40 })),
+  ]);
+}
+
+export async function renderDocx(product: WorkProduct, sources: SourceDocument[], organization: OrganizationProfile): Promise<Uint8Array> {
   try {
+    const font = organization.brand.fontFamily;
+    const primary = hex(organization.brand.primaryColor);
+    const sourceTitles = new Map(sources.map((source) => [source.id, source.filename ?? source.title]));
     const content: Array<Paragraph | Table> = [
-      new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: clean(product.title), bold: true, size: 40, font })] }),
-      ...(product.subtitle ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 420 }, children: [new TextRun({ text: clean(product.subtitle), italics: true, size: 24, font })] })] : []),
-      ...product.blocks.flatMap(blockNodes),
-      para("Assumptions and source notes", { heading: HeadingLevel.HEADING_1 }),
-      ...product.assumptions.map((item) => para(item, { bullet: true })),
-      ...sources.filter((source) => source.extractionStatus === "complete").map((source) => para(`${source.title}${source.filename ? ` (${source.filename})` : ""} — ${source.kind}`, { bullet: true })),
+      new Paragraph({ spacing: { before: 600, after: 160 }, children: [run(product.title, { bold: true, size: 44, color: primary })] }),
+      ...(product.subtitle ? [new Paragraph({ spacing: { after: 120 }, children: [run(product.subtitle, { italics: true, size: 26, color: MUTED })] })] : []),
+      new Paragraph({ spacing: { after: 480 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: hex(organization.brand.accentColor), space: 8 } }, children: [run(`Prepared by ${organization.name} for internal review. Not sent to or accepted by any client.`, { size: 20, color: MUTED })] }),
+      ...product.blocks.flatMap((block) => blockNodes(block, organization, sourceTitles)),
+      para("Working assumptions", { heading: HeadingLevel.HEADING_1, color: primary, bold: true, size: 28 }),
+      ...product.assumptions.map((item) => para(item, { bullet: true, after: 80 })),
+      ...(product.warnings.length ? [para("Warnings", { heading: HeadingLevel.HEADING_1, color: primary, bold: true, size: 28 }), ...product.warnings.map((item) => para(item, { bullet: true, after: 80 }))] : []),
+      para("Source notes", { heading: HeadingLevel.HEADING_1, color: primary, bold: true, size: 28 }),
+      ...sourceNotes(product, sources),
     ];
     const doc = new Document({
-      styles: { default: { document: { run: { font, size: 22, color: "243B53" }, paragraph: { spacing: { after: 140 } } } } },
-      sections: [{ properties: { page: { margin: { top: 900, right: 900, bottom: 900, left: 900 } } }, footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun("Review draft | "), new TextRun({ children: [PageNumber.CURRENT] })] })] }) }, children: content }],
+      creator: organization.name, title: officeText(product.title), description: "AfterHours review draft",
+      styles: { default: { document: { run: { font, size: 22, color: "243B53" }, paragraph: { spacing: { after: 120 } } } } },
+      sections: [{
+        properties: { page: { margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN, header: 500, footer: 500 } } },
+        headers: { default: new Header({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [run(`${organization.name}  |  ${shorten(product.title, 70)}`, { size: 16, color: MUTED })] })] }) },
+        footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "Review draft  |  Page ", size: 16, color: MUTED }), new TextRun({ children: [PageNumber.CURRENT], size: 16, color: MUTED }), new TextRun({ text: " of ", size: 16, color: MUTED }), new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 16, color: MUTED })] })] }) },
+        children: content,
+      }],
     });
     return new Uint8Array(await Packer.toBuffer(doc));
   } catch (error) {
-    throw new EngineError("EXPORT_FAILED", `DOCX export failed: ${error instanceof Error ? error.message : "unknown error"}`, false);
+    throw new EngineError("EXPORT_FAILED", `DOCX export failed: ${error instanceof Error ? error.name : "unknown error"}`, false);
   }
 }

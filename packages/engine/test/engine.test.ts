@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { inflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import type { DemoFixture, EngineInput, OrganizationProfile } from "@afterhours/contracts";
 import { calculateSales, EngineError, resolveDeadline, runWork } from "../src/index";
+import { unzip } from "./zip";
 
 const root = resolve(import.meta.dirname, "../../..");
 const loadJson = async <T>(path: string): Promise<T> => JSON.parse(await readFile(resolve(root, path), "utf8")) as T;
@@ -19,33 +19,6 @@ async function inputFor(scenario: DemoFixture["scenario"], overrides: Partial<En
 }
 
 const deps = () => ({ onProgress: async () => undefined, signal: new AbortController().signal });
-
-function unzip(bytes: Uint8Array): Map<string, Uint8Array> {
-  const buffer = Buffer.from(bytes);
-  let eocd = buffer.length - 22;
-  while (eocd >= 0 && buffer.readUInt32LE(eocd) !== 0x06054b50) eocd -= 1;
-  if (eocd < 0) throw new Error("Missing ZIP end record");
-  const count = buffer.readUInt16LE(eocd + 10);
-  let cursor = buffer.readUInt32LE(eocd + 16);
-  const entries = new Map<string, Uint8Array>();
-  for (let index = 0; index < count; index += 1) {
-    if (buffer.readUInt32LE(cursor) !== 0x02014b50) throw new Error("Invalid ZIP directory");
-    const method = buffer.readUInt16LE(cursor + 10);
-    const compressedSize = buffer.readUInt32LE(cursor + 20);
-    const filenameLength = buffer.readUInt16LE(cursor + 28);
-    const extraLength = buffer.readUInt16LE(cursor + 30);
-    const commentLength = buffer.readUInt16LE(cursor + 32);
-    const localOffset = buffer.readUInt32LE(cursor + 42);
-    const name = buffer.subarray(cursor + 46, cursor + 46 + filenameLength).toString("utf8");
-    const localNameLength = buffer.readUInt16LE(localOffset + 26);
-    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
-    const start = localOffset + 30 + localNameLength + localExtraLength;
-    const compressed = buffer.subarray(start, start + compressedSize);
-    entries.set(name, method === 8 ? new Uint8Array(inflateRawSync(compressed)) : new Uint8Array(compressed));
-    cursor += 46 + filenameLength + extraLength + commentLength;
-  }
-  return entries;
-}
 
 describe("sales calculations", () => {
   it("computes the exact report metrics from CSV", async () => {
@@ -103,10 +76,10 @@ describe("fixture pipeline", () => {
     expect(result.products.find((product) => product.kind === "presentation")?.slides).toHaveLength(5);
     expect(JSON.stringify(result.products)).toContain("USD 6,000");
     const docx = unzip(result.files.find((file) => file.format === "docx")!.bytes);
-    expect(Buffer.from(docx.get("word/document.xml")!).toString("utf8")).toContain("Maple &amp; Moss Launch Strategy Proposal");
+    expect(Buffer.from(docx.get("word/document.xml")!).toString("utf8")).toContain("Maple &amp; Moss Proposal");
     const pptx = unzip(result.files.find((file) => file.format === "pptx")!.bytes);
     expect([...pptx.keys()].filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))).toHaveLength(5);
-    expect(Buffer.from(pptx.get("ppt/slides/slide1.xml")!).toString("utf8")).toContain("Maple &amp; Moss launch strategy");
+    expect(Buffer.from(pptx.get("ppt/slides/slide1.xml")!).toString("utf8")).toContain("Maple &amp; Moss proposal kickoff");
     if (process.env.ENGINE_RENDER_DIR) {
       await mkdir(process.env.ENGINE_RENDER_DIR, { recursive: true });
       await Promise.all(result.files.map((file) => writeFile(resolve(process.env.ENGINE_RENDER_DIR!, file.filename), file.bytes)));

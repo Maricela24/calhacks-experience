@@ -1,96 +1,156 @@
 import type { ContentBlock, EngineInput, SlideContent, SourceDocument, SourceRef, WorkPlan, WorkProduct } from "@afterhours/contracts";
 import type { SalesMetrics } from "./calculations";
-import { usd } from "./calculations";
+import { monthLabel, usd } from "./calculations";
+import { formatLocal } from "./dates";
 import { stableId } from "./ids";
 import type { ProposalFacts } from "./proposalFacts";
 
 const empty = { items: [] as string[], columns: [] as string[], rows: [] as string[][], chart: null };
-const sourceByKind = (sources: SourceDocument[], kind: SourceDocument["kind"]) => sources.find((source) => source.kind === kind)!;
 const attachment = (sources: SourceDocument[], suffix?: string) => sources.find((source) => source.kind === "attachment" && (!suffix || source.filename?.endsWith(suffix)))!;
 const ref = (source: SourceDocument, quote: string | null, locator: string | null = null): SourceRef => ({ sourceId: source.id, quote, locator });
 
-function paragraph(id: string, heading: string, text: string, basis: ContentBlock["basis"], evidence: SourceRef[] = []): ContentBlock {
+function paragraph(id: string, heading: string | null, text: string, basis: ContentBlock["basis"], evidence: SourceRef[] = []): ContentBlock {
   return { id, kind: "paragraph", heading, text, ...empty, basis, evidence };
 }
-function bullets(id: string, heading: string, items: string[], basis: ContentBlock["basis"], evidence: SourceRef[] = []): ContentBlock {
+function bullets(id: string, heading: string | null, items: string[], basis: ContentBlock["basis"], evidence: SourceRef[] = []): ContentBlock {
   return { id, kind: "bullets", heading, text: null, items, columns: [], rows: [], chart: null, basis, evidence };
 }
 function table(id: string, heading: string, columns: string[], rows: string[][], basis: ContentBlock["basis"], evidence: SourceRef[] = []): ContentBlock {
   return { id, kind: "table", heading, text: null, items: [], columns, rows, chart: null, basis, evidence };
 }
-
 function slide(id: string, title: string, layout: SlideContent["layout"], blocks: ContentBlock[], speakerNotes: string): SlideContent {
   return { id, title, layout, blocks, speakerNotes };
 }
+const lowerFirst = (value: string) => value ? value[0]!.toLowerCase() + value.slice(1) : value;
+/** Joins prose items; pass `names` to keep proper names (channels, clients) as written. */
+function sentenceList(items: string[], names = false): string {
+  const values = names ? items : items.map(lowerFirst);
+  if (values.length <= 2) return values.join(" and ");
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+const WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
+const countWord = (value: number) => WORDS[value] ?? String(value);
+const halves = <T>(items: T[]): [T[], T[]] => [items.slice(0, Math.ceil(items.length / 2)), items.slice(Math.ceil(items.length / 2))];
 
-export function proposalProducts(input: EngineInput, sources: SourceDocument[], plan: WorkPlan, fromAnswers = false, extracted?: ProposalFacts): WorkProduct[] {
-  const email = sourceByKind(sources, "email");
-  const org = sourceByKind(sources, "organization");
-  const brief = attachment(sources, ".md");
+interface ProposalInputs { client: string; fee: string; schedule: string; scopeItems: string[]; objectives: string[]; exclusions: string[]; constraints: string | null; unknowns: string[]; durationWeeks: number | null; evidence: ProposalFacts["evidence"] }
+
+function fromAnswers(input: EngineInput, sources: SourceDocument[]): ProposalInputs {
   const answers = Object.fromEntries(input.answers.map((answer) => [answer.questionId, answer.answer.trim()]));
-  const client = fromAnswers ? (answers.client_identity ?? "Client") : extracted!.client;
-  const scope = fromAnswers ? (answers.project_scope ?? "Scope to be confirmed") : extracted!.scope;
-  const fee = fromAnswers ? (answers.authorized_fee ?? "Fee to be confirmed") : extracted!.fee;
-  const schedule = fromAnswers ? (answers.project_schedule ?? "Schedule to be confirmed") : extracted!.schedule;
-  const emailEvidence = [ref(email, fromAnswers ? input.email.bodyText : null)];
-  const briefEvidence = brief ? [ref(brief, null)] : [];
-  const orgEvidence = [ref(org, null)];
-  const answerEvidence = (id: string) => {
-    const source = sources.find((item) => item.kind === "user_answer" && item.title.endsWith(id));
-    return source ? [ref(source, source.text)] : [];
+  const answerRef = (id: string) => {
+    const source = sources.find((item) => item.kind === "user_answer" && item.title === `Answer: ${id}`);
+    return source ? [ref(source, source.text.length <= 300 ? source.text : null)] : [];
   };
+  const scope = answers.project_scope!;
+  return {
+    client: answers.client_identity!, fee: answers.authorized_fee!, schedule: answers.project_schedule!,
+    scopeItems: [scope], objectives: [scope], exclusions: [], constraints: null, durationWeeks: null,
+    unknowns: ["Exclusions were not supplied and must be confirmed before agreement.", "Payment milestones are not stated and remain to be agreed."],
+    evidence: { client: answerRef("client_identity"), fee: answerRef("authorized_fee"), schedule: answerRef("project_schedule"), scope: answerRef("project_scope"), objectives: answerRef("project_scope"), exclusions: [], constraints: [] },
+  };
+}
+
+export function proposalProducts(input: EngineInput, sources: SourceDocument[], plan: WorkPlan, answered: boolean, extracted?: ProposalFacts): WorkProduct[] {
+  const facts: ProposalInputs = answered ? fromAnswers(input, sources) : extracted!;
+  const org = input.organization.name;
+  const { client, fee, schedule, evidence } = facts;
+  const deadline = plan.dueAt ? formatLocal(plan.dueAt, input.organization.timezone) : null;
+  const engagement = facts.durationWeeks ? `a ${facts.durationWeeks}-week engagement` : "an engagement";
   const productId = stableId(input.taskId, input.revision, "proposal", 0);
+  const scheduleEvidence = evidence.schedule.length ? evidence.schedule : evidence.client;
   const blocks: ContentBlock[] = [
-    paragraph(`${productId}-summary`, "Executive summary", `${input.organization.name} will prepare ${scope} for ${client}. This review draft aligns the work to the client's stated launch needs without promising commercial outcomes.`, "source", fromAnswers ? answerEvidence("project_scope") : briefEvidence),
-    bullets(`${productId}-objectives`, "Understanding and objectives", fromAnswers ? [`Client: ${client}`, `Authorized scope: ${scope}`, `Schedule: ${schedule}`] : ["Define working audience hypotheses for a local refillable personal-care launch.", "Develop message directions and a usable four-week content calendar.", "Establish a simple measurement plan despite the absence of a reliable baseline."], "source", fromAnswers ? answerEvidence("client_identity") : briefEvidence),
-    table(`${productId}-scope`, "Scope and deliverables", ["Phase", "Deliverable"], [["1. Discovery", "Brief review and launch alignment"], ["2. Strategy", "Audience hypotheses and message directions"], ["3. Activation plan", "Four-week content calendar"], ["4. Measurement", "Metric definitions and baseline plan"]], "source", fromAnswers ? answerEvidence("project_scope") : orgEvidence),
-    table(`${productId}-commercials`, "Timeline and fee", ["Item", "Review-draft position"], [["Engagement", schedule], ["Strategy fee", fee], ["Payment milestones", "Unknown; to be confirmed before agreement"]], "source", fromAnswers ? [...answerEvidence("authorized_fee"), ...answerEvidence("project_schedule")] : [...emailEvidence, ...orgEvidence]),
-    bullets(`${productId}-responsibilities`, "Responsibilities and dependencies", ["Client provides timely access to product, launch, and channel context.", "Harbor Creative develops the agreed strategy artifacts for review.", "Audience directions remain hypotheses until tested with evidence."], "recommendation"),
-    bullets(`${productId}-exclusions`, "Exclusions", ["Paid media spend", "Ongoing campaign management", "Custom website development", "Guaranteed revenue or sales outcomes"], "source", orgEvidence),
-    bullets(`${productId}-success`, "Proposed success measures", ["Content calendar completion and approval", "Message-direction feedback captured", "Baseline metrics defined before launch", "Weekly measurement review established"], "recommendation"),
-    bullets(`${productId}-assumptions`, "Assumptions and unknowns", ["This is a review draft, not an accepted agreement.", "No reliable campaign baseline currently exists.", "Payment milestones remain to be agreed."], "assumption"),
-    paragraph(`${productId}-next`, "Next steps", `Confirm the scope, ${fee} fee, schedule, and payment milestones; then approve the working audience hypotheses before content planning begins.`, "recommendation"),
+    paragraph(`${productId}-summary`, "Executive summary", `${org} proposes ${engagement} for ${client} covering ${sentenceList(facts.scopeItems)}. This is a review draft: it does not promise commercial outcomes and has not been sent to or accepted by the client.`, "source", [...evidence.scope, ...evidence.client]),
+    bullets(`${productId}-objectives`, "Understanding and objectives", facts.objectives, "source", evidence.objectives),
+    ...(facts.constraints ? [paragraph(`${productId}-constraints`, "Constraints stated in the brief", facts.constraints, "source", evidence.constraints)] : []),
+    table(`${productId}-scope`, "Scope and deliverables", ["#", "Deliverable"], facts.scopeItems.map((item, index) => [String(index + 1), item]), "source", evidence.scope),
+    table(`${productId}-commercials`, "Timeline and fee", ["Item", "Review-draft position"], [
+      ["Engagement schedule", schedule],
+      ...(deadline ? [["Draft due", deadline]] : []),
+      ["Strategy fee", fee],
+      ["Payment milestones", "Not stated in the sources; to be agreed"],
+    ], "source", [...evidence.fee, ...scheduleEvidence]),
+    bullets(`${productId}-responsibilities`, "Responsibilities and dependencies", [`${client} provides timely access to product, launch, and channel context.`, `${org} develops the agreed deliverables for review.`, "Working hypotheses stay labeled as hypotheses until tested with evidence."], "recommendation"),
+    ...(facts.exclusions.length ? [bullets(`${productId}-exclusions`, "Exclusions", facts.exclusions, "source", evidence.exclusions)] : []),
+    bullets(`${productId}-success`, "Proposed success measures", ["Deliverables completed and approved on schedule", "Feedback on each deliverable captured in writing", "Baseline metrics defined before launch activity", "A regular measurement review established"], "recommendation"),
+    bullets(`${productId}-assumptions`, "Assumptions and unknowns", ["This is a review draft, not an accepted agreement.", ...facts.unknowns], "assumption"),
+    paragraph(`${productId}-next`, "Next steps", `Confirm the scope, the ${fee} fee, the schedule, and payment milestones, then approve any working hypotheses before delivery work begins.`, "recommendation"),
   ];
   const deckId = stableId(input.taskId, input.revision, "presentation", 0);
+  const [scopeA, scopeB] = halves(facts.scopeItems);
   const slides: SlideContent[] = [
-    slide(`${deckId}-1`, `${client} launch strategy`, "title", [paragraph(`${deckId}-1a`, "Review draft", `${input.organization.name} | ${schedule}`, "assumption")], "For internal review before any client commitment."),
-    slide(`${deckId}-2`, "Goals and constraints", "bullets", [bullets(`${deckId}-2a`, "What we heard", fromAnswers ? [`Client: ${client}`, `Requested scope: ${scope}`, `Authorized schedule: ${schedule}`] : ["Clarify audience hypotheses", "Develop message directions", "Create a four-week content calendar", "Build a simple measurement plan", "No reliable baseline or sales-growth promise"], "source", fromAnswers ? answerEvidence("project_scope") : briefEvidence)], "Distinguish hypotheses from established audience facts."),
-    slide(`${deckId}-3`, "Scope and deliverables", "two_column", [bullets(`${deckId}-3a`, "Strategy", ["Discovery", "Audience hypotheses", "Message directions"], "source", fromAnswers ? answerEvidence("project_scope") : orgEvidence), bullets(`${deckId}-3b`, "Activation", ["Four-week content calendar", "Measurement framework", "Review-ready recommendations"], "source", fromAnswers ? answerEvidence("project_scope") : orgEvidence)], "All deliverables stay within the authorized strategy scope."),
-    slide(`${deckId}-4`, "Four-week plan and fee", "two_column", [bullets(`${deckId}-4a`, "Timeline", [schedule, "Weekly working review", "Calendar weeks used for planning"], "source", fromAnswers ? answerEvidence("project_schedule") : emailEvidence), bullets(`${deckId}-4b`, "Commercials", [`Strategy fee: ${fee}`, "Paid media separate", "Payment milestones to confirm"], "source", fromAnswers ? answerEvidence("authorized_fee") : orgEvidence)], "The stated fee excludes paid media and ongoing management."),
-    slide(`${deckId}-5`, "Decisions and next steps", "closing", [bullets(`${deckId}-5a`, "Confirm before kickoff", ["Approve scope and schedule", "Confirm fee and payment milestones", "Validate audience hypotheses", "Agree baseline measurement approach"], "recommendation")], "This deck supports review; it does not record acceptance."),
+    slide(`${deckId}-1`, `${client} proposal kickoff`, "title", [paragraph(`${deckId}-1a`, "Review draft", `${org} | ${schedule}`, "source", scheduleEvidence)], "For internal review before any client commitment."),
+    slide(`${deckId}-2`, facts.constraints ? "Goals and constraints" : "Goals", facts.constraints ? "two_column" : "bullets", [
+      bullets(`${deckId}-2a`, "What we heard", facts.objectives, "source", evidence.objectives),
+      ...(facts.constraints ? [paragraph(`${deckId}-2b`, "Constraints from the brief", facts.constraints.replace(/^Constraints?:\s*(\S)/i, (_, first: string) => first.toUpperCase()), "source", evidence.constraints)] : []),
+    ], "Distinguish working hypotheses from established audience facts."),
+    slide(`${deckId}-3`, "Scope and deliverables", scopeB.length ? "two_column" : "bullets", [
+      bullets(`${deckId}-3a`, scopeB.length ? "Strategy" : "Deliverables", scopeA, "source", evidence.scope),
+      ...(scopeB.length ? [bullets(`${deckId}-3b`, "Activation and measurement", scopeB, "source", evidence.scope)] : []),
+    ], "All deliverables stay within the authorized scope."),
+    slide(`${deckId}-4`, "Timeline and fee", "two_column", [
+      bullets(`${deckId}-4a`, "Timeline", [schedule, ...(deadline ? [`Draft due ${deadline}`] : [])], "source", scheduleEvidence),
+      bullets(`${deckId}-4b`, "Commercials", [`Strategy fee: ${fee}`, ...(facts.exclusions.length ? [`Excludes ${sentenceList(facts.exclusions.slice(0, 2))}`] : [])], "source", [...evidence.fee, ...evidence.exclusions]),
+    ], facts.exclusions.length ? `Full exclusions: ${sentenceList(facts.exclusions)}.` : "Exclusions are not stated and must be confirmed."),
+    slide(`${deckId}-5`, "Decisions and next steps", "closing", [bullets(`${deckId}-5a`, "Confirm before kickoff", ["Approve scope and schedule", "Confirm the fee and agree payment milestones", "Validate working hypotheses", "Agree the baseline measurement approach"], "recommendation")], "This deck supports review; it does not record acceptance."),
   ];
   return [
-    { id: productId, kind: "proposal", title: `${client} Launch Strategy Proposal`, subtitle: "Review draft", blocks, slides: [], assumptions: plan.assumptions, warnings: [] },
-    { id: deckId, kind: "presentation", title: `${client} Kickoff Deck`, subtitle: "Five-slide review draft", blocks: [], slides, assumptions: plan.assumptions, warnings: [] },
+    { id: productId, kind: "proposal", title: `${client} Proposal`, subtitle: "Review draft prepared for internal review", blocks, slides: [], assumptions: plan.assumptions, warnings: [] },
+    { id: deckId, kind: "presentation", title: `${client} Kickoff Deck`, subtitle: `${countWord(slides.length)}-slide review draft`, blocks: [], slides, assumptions: plan.assumptions, warnings: [] },
   ];
+}
+
+const pctText = (value: number | null) => value === null ? "not computable (zero starting value)" : `${Math.abs(value).toFixed(value % 1 ? 1 : 0)}%`;
+function change(value: number | null, delta: number, noun: string): string {
+  if (delta === 0) return `${noun} was unchanged`;
+  return `${noun} ${delta > 0 ? "increased" : "decreased"} ${pctText(value)}`;
+}
+
+export function reportTitle(metrics: SalesMetrics): string {
+  const [first, second] = metrics.months;
+  const sameYear = first!.month.slice(0, 4) === second!.month.slice(0, 4);
+  return `${monthLabel(first!.month, !sameYear)}-${monthLabel(second!.month)}`;
 }
 
 export function reportProducts(input: EngineInput, sources: SourceDocument[], plan: WorkPlan, metrics: SalesMetrics): WorkProduct[] {
   const data = attachment(sources, ".csv");
-  const dataRef = [ref(data, null, `CSV rows 2-${metrics.rows.length + 1}; sums and percent-change formulas computed in code`)];
+  const dataRef = [ref(data, null, `CSV rows 2-${metrics.rows.length + 1}; sums, averages, shares, and percent changes computed in code`)];
   const [first, second] = metrics.months;
-  const fmtPct = (value: number | null) => value === null ? "undefined (zero denominator)" : `${value.toFixed(value % 1 ? 1 : 0)}%`;
+  const m1 = monthLabel(first!.month);
+  const m2 = monthLabel(second!.month);
+  const period = reportTitle(metrics);
+  const aov = (minor: number | null) => minor === null ? "unknown (no orders)" : usd(minor);
+  const aovSentence = first!.averageOrderValueMinor === second!.averageOrderValueMinor
+    ? `average order value was ${aov(first!.averageOrderValueMinor)} in both months`
+    : `average order value moved from ${aov(first!.averageOrderValueMinor)} to ${aov(second!.averageOrderValueMinor)}`;
+  const byRevenue = [...metrics.channels].sort((a, b) => (b.values[second!.month]! - a.values[second!.month]!) || a.channel.localeCompare(b.channel));
+  const top = byRevenue[0]!;
+  // Never present one channel as "largest" when it is tied with another.
+  const topTied = byRevenue.length > 1 && byRevenue[1]!.values[second!.month] === top.values[second!.month];
   const productId = stableId(input.taskId, input.revision, "report", 0);
-  const chart: ContentBlock = { id: `${productId}-chart`, kind: "chart", heading: "Revenue by month", text: null, items: [], columns: [], rows: [], chart: { type: "bar", labels: metrics.months.map((item) => item.month), series: [{ name: "Revenue (USD)", values: metrics.months.map((item) => item.revenueMinor / 100) }], unit: "USD" }, evidence: dataRef, basis: "calculated" };
+  const chart: ContentBlock = { id: `${productId}-chart`, kind: "chart", heading: "Revenue by month (USD)", text: null, items: [], columns: [], rows: [], chart: { type: "bar", labels: [m1, m2], series: [{ name: "Revenue (USD)", values: metrics.months.map((item) => item.revenueMinor / 100) }], unit: "USD" }, evidence: dataRef, basis: "calculated" };
+  const revenueLine = `Revenue moved from ${usd(first!.revenueMinor)} in ${m1} to ${usd(second!.revenueMinor)} in ${m2}, a change of ${metrics.revenueChangeMinor < 0 ? "-" : ""}${usd(Math.abs(metrics.revenueChangeMinor))} (${change(metrics.revenueGrowthPercent, metrics.revenueChangeMinor, "revenue")}).`;
   const blocks: ContentBlock[] = [
-    paragraph(`${productId}-summary`, "Executive summary", `Revenue increased from ${usd(first!.revenueMinor)} in ${first!.month} to ${usd(second!.revenueMinor)} in ${second!.month}, an increase of ${usd(metrics.revenueChangeMinor)} (${fmtPct(metrics.revenueGrowthPercent)}). Orders increased from ${first!.orders} to ${second!.orders} (${fmtPct(metrics.orderGrowthPercent)}), while average order value remained ${usd(first!.averageOrderValueMinor!)}.`, "calculated", dataRef),
+    paragraph(`${productId}-summary`, "Executive summary", `${revenueLine} Orders moved from ${first!.orders} to ${second!.orders} (${change(metrics.orderGrowthPercent, metrics.orderChange, "orders")}), and ${aovSentence}.`, "calculated", dataRef),
     chart,
-    table(`${productId}-monthly`, "Monthly performance", ["Month", "Revenue", "Orders", "Average order value"], metrics.months.map((item) => [item.month, usd(item.revenueMinor), String(item.orders), item.averageOrderValueMinor === null ? "Unknown" : usd(item.averageOrderValueMinor)]), "calculated", dataRef),
-    table(`${productId}-channels`, "Channel revenue", ["Channel", ...metrics.months.map((item) => item.month)], metrics.channels.map((channel) => [channel.channel, ...metrics.months.map((item) => usd(channel.values[item.month] ?? 0))]), "calculated", dataRef),
-    paragraph(`${productId}-share`, "Channel mix", `Website represented ${metrics.websiteSharePercent[first!.month]}% of revenue in ${first!.month} and ${metrics.websiteSharePercent[second!.month]}% in ${second!.month}; shares are rounded to one decimal place.`, "calculated", dataRef),
-    bullets(`${productId}-limits`, "Limitations", ["The dataset does not include campaign exposure, cost, margin, returns, or customer identifiers.", "ROAS, profit, retention, CAC, and conversion rate cannot be calculated.", "The increase is an observation; the data does not establish causality."], "source", dataRef),
+    table(`${productId}-monthly`, "Monthly performance", ["Month", "Revenue", "Orders", "Average order value"], metrics.months.map((item) => [monthLabel(item.month), usd(item.revenueMinor), String(item.orders), aov(item.averageOrderValueMinor)]), "calculated", dataRef),
+    table(`${productId}-channels`, "Channel revenue", ["Channel", m1, m2, "Change"], byRevenue.map((channel) => [channel.channel, usd(channel.values[first!.month]!), usd(channel.values[second!.month]!), channel.values[first!.month] === channel.values[second!.month] ? "Unchanged" : channel.growthPercent === null ? "Not computable" : `${channel.growthPercent > 0 ? "+" : "-"}${pctText(channel.growthPercent)}`]), "calculated", dataRef),
+    paragraph(`${productId}-share`, "Channel mix", topTied ? `Several channels tied for the largest share of revenue in ${m2}; the channel table lists each channel's revenue.` : `${top.channel} represented ${top.sharePercent[first!.month]}% of revenue in ${m1} and ${top.sharePercent[second!.month]}% in ${m2}; shares are rounded to one decimal place.`, "calculated", dataRef),
+    bullets(`${productId}-limits`, "Limitations", ["The dataset does not include campaign exposure, cost, margin, returns, or customer identifiers.", "ROAS, profit, retention, CAC, and conversion rate cannot be calculated.", "The change is an observation; the data does not establish causality."], "source", dataRef),
     bullets(`${productId}-recommend`, "Recommended next steps", ["Continue monthly revenue and order tracking by channel.", "Add campaign cost and exposure fields before evaluating marketing efficiency.", "Document returns and margin definitions before profit analysis."], "recommendation"),
   ];
   const deckId = stableId(input.taskId, input.revision, "presentation", 0);
+  const channelBlocks: ContentBlock[] = metrics.channels.length <= 2
+    ? byRevenue.map((channel, index) => bullets(`${deckId}-3${index}`, channel.channel, [`${m1}: ${usd(channel.values[first!.month]!)}`, `${m2}: ${usd(channel.values[second!.month]!)}`, `Share in ${m2}: ${channel.sharePercent[second!.month]}%`], "calculated", dataRef))
+    : [table(`${deckId}-3t`, metrics.channels.length > 6 ? "Revenue by channel (largest six; all in the report)" : "Revenue by channel", ["Channel", m1, m2], byRevenue.slice(0, 6).map((channel) => [channel.channel, usd(channel.values[first!.month]!), usd(channel.values[second!.month]!)]), "calculated", dataRef)];
+  const revenueTitle = change(metrics.revenueGrowthPercent, metrics.revenueChangeMinor, "Revenue");
   const slides: SlideContent[] = [
-    slide(`${deckId}-1`, "January-February sales update", "title", [paragraph(`${deckId}-1a`, "Dataset scope", "Revenue and orders by Website and Partnerships", "source", dataRef)], "All values are calculated from the attached CSV."),
-    slide(`${deckId}-2`, "Revenue grew 25%", "chart", [{ ...chart, id: `${deckId}-2a` }], `${usd(metrics.revenueChangeMinor)} month-over-month increase; causality is not established.`),
-    slide(`${deckId}-3`, "Channel performance", "two_column", metrics.channels.map((channel, index) => bullets(`${deckId}-3${index}`, channel.channel, metrics.months.map((month) => `${month.month}: ${usd(channel.values[month.month] ?? 0)}`), "calculated", dataRef)), "Both channels increased by 25%."),
-    slide(`${deckId}-4`, "Orders and order value", "bullets", [bullets(`${deckId}-4a`, "Key metrics", [`Orders: ${first!.orders} to ${second!.orders} (${fmtPct(metrics.orderGrowthPercent)})`, `Average order value: ${usd(first!.averageOrderValueMinor!)} in both months`, `Website share: ${metrics.websiteSharePercent[first!.month]}% in both months`], "calculated", dataRef)], "Revenue and order growth moved together; average order value did not change."),
+    slide(`${deckId}-1`, `${period} sales update`, "title", [paragraph(`${deckId}-1a`, "Dataset scope", `Revenue and orders by channel: ${sentenceList(byRevenue.slice(0, 4).map((channel) => channel.channel), true)}${byRevenue.length > 4 ? ", and others" : ""}`, "calculated", dataRef)], "All values are calculated in code from the attached CSV."),
+    slide(`${deckId}-2`, revenueTitle, "chart", [{ ...chart, id: `${deckId}-2a` }], `${revenueLine} Causality is not established.`),
+    slide(`${deckId}-3`, "Channel performance", metrics.channels.length === 2 ? "two_column" : "bullets", channelBlocks, metrics.channels.length > 6 ? "Only the six largest channels are shown; the report lists every channel." : "Values are channel revenue sums from the CSV."),
+    slide(`${deckId}-4`, "Orders and order value", "bullets", [bullets(`${deckId}-4a`, "Key metrics", [`Orders: ${first!.orders} to ${second!.orders} (${change(metrics.orderGrowthPercent, metrics.orderChange, "orders")})`, `Average order value: ${aov(first!.averageOrderValueMinor)} to ${aov(second!.averageOrderValueMinor)}`, topTied ? "Several channels tied for the largest revenue share" : `${top.channel} share of revenue: ${top.sharePercent[first!.month]}% to ${top.sharePercent[second!.month]}%`], "calculated", dataRef)], "Average order value is revenue divided by orders for each month."),
     slide(`${deckId}-5`, "Limits and next steps", "closing", [bullets(`${deckId}-5a`, "Keep the interpretation bounded", ["Do not infer campaign causality", "Add cost and exposure data", "Track margin and returns", "Continue channel-level monitoring"], "recommendation")], "ROAS, CAC, profit, retention, and conversion are not computable from this dataset."),
   ];
   return [
-    { id: productId, kind: "report", title: "January-February Sales Performance Report", subtitle: "Calculated from the supplied CSV", blocks, slides: [], assumptions: plan.assumptions, warnings: [] },
-    { id: deckId, kind: "presentation", title: "January-February Sales Update", subtitle: "Five-slide review deck", blocks: [], slides, assumptions: plan.assumptions, warnings: [] },
+    { id: productId, kind: "report", title: `${period} Sales Performance Report`, subtitle: "Calculated from the supplied CSV", blocks, slides: [], assumptions: plan.assumptions, warnings: [] },
+    { id: deckId, kind: "presentation", title: `${period} Sales Update`, subtitle: `${countWord(slides.length)}-slide review deck`, blocks: [], slides, assumptions: plan.assumptions, warnings: [] },
   ];
 }
