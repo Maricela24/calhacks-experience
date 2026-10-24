@@ -11,6 +11,8 @@ const apiOrigin = (process.env.API_ORIGIN ?? "http://127.0.0.1:4000").replace(/\
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
+  // The browser suite runs a second dev server from this folder; it needs its own build directory.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Workspace packages export TypeScript source; Next must compile them.
   transpilePackages: ["@afterhours/contracts"],
   async rewrites() {

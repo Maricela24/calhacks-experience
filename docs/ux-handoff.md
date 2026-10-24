@@ -76,6 +76,15 @@ missing. That is never a pass.
 
 With `experience` + `platform` `aaed3db` + `person-2-engine` `a45bd5a` merged locally: 139 unit tests, typecheck, lint, build pass and `pnpm test:e2e` exits 0 (12 passed, 1 not applicable). Details and file evidence: `docs/batches/batch-2/maricella.md`, Update 2. Downloaded files were opened by LibreOffice, not Word/PowerPoint.
 
+## Batch 3 (clarification, retry, charts, sources, layout)
+
+Details and evidence: `docs/batches/batch-3/maricella.md`. Summary: the clarification form keeps unsent text across polling,
+conflicts and revision changes; stale/invalid answers show real server outcomes; retry is single-shot per click; charts and
+source dialogs render only returned data; long content no longer stretches the page at 390 px. The browser suite now also
+starts a second stack whose live model has no credentials, to exercise the real `MODEL_NOT_CONFIGURED` failure, retry and
+dismiss paths. Open gap: the real engine returns `quote: null` for every evidence reference (Joanne), so the real-quote
+browser test is BLOCKED and the runner exits 3.
+
 ## Not verified / remaining
 
 - Real engine output (Joanne), live model, live Gmail, live WhatsApp: none exercised from the UI.

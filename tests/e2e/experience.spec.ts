@@ -41,7 +41,7 @@ test("1. proposal: inject, observe progress, preview both products, download rea
 
   // Real, persisted progress is visible while the worker runs.
   await page.getByRole("tab", { name: /^Activity/ }).click();
-  await expect(page.getByRole("tabpanel").getByText("Reading request").first()).toBeVisible();
+  await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText("Reading request").first()).toBeVisible();
   await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
 
   // One proposal document and one presentation, both previewable.
@@ -105,6 +105,21 @@ test("2. report: calculated values appear consistently in the preview and chart 
   await expect(chart).toHaveAttribute("aria-label", /15,000/);
   await page.getByText(/^Chart data/).first().click();
   await expect(page.locator(".chart-data table").first()).toContainText("12,000");
+
+  // The downloaded report and deck carry the same numbers as the preview.
+  const docx = await downloadFile(page, /Download .*\.docx/);
+  const docText = xmlText(readZip(docx.bytes).get("word/document.xml"));
+  for (const value of [/12,000/, /15,000/, /3,000/, /25%/]) expect(docText).toMatch(value);
+  const pptx = await downloadFile(page, /Download .*\.pptx/);
+  const pptxParts = readZip(pptx.bytes);
+  const deckText = [...pptxParts.keys()].filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k)).map((k) => xmlText(pptxParts.get(k))).join("\n");
+  expect(deckText).toMatch(/25%/);
+  // The deck's chart is a native chart: its data lives in the chart part, as plain numbers.
+  const chartParts = [...pptxParts.keys()].filter((k) => /^ppt\/charts\/chart\d+\.xml$/.test(k));
+  expect(chartParts.length, "native chart part(s) in the PPTX").toBeGreaterThan(0);
+  const chartXml = chartParts.map((k) => pptxParts.get(k)!.toString("utf8")).join("\n");
+  expect(chartXml).toMatch(/<c:v>12000<\/c:v>/);
+  expect(chartXml).toMatch(/<c:v>15000<\/c:v>/);
 });
 
 test("3. ambiguous: answer the questions, get a new revision, and generation resumes", async ({ page }) => {
@@ -127,6 +142,15 @@ test("3. ambiguous: answer the questions, get a new revision, and generation res
   await expect(page.getByText(/Revision 2/).first()).toBeVisible({ timeout: 30_000 });
   await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
   expect((await taskStatus(page, taskId)).revision).toBe(2);
+
+  // Activity keeps both revisions, and the earlier answers stay on record in the Plan tab.
+  await page.getByRole("tab", { name: /^Activity/ }).click();
+  const activity = page.locator(".details-tabs").getByRole("tabpanel");
+  await expect(activity.getByText("revision 1").first()).toBeVisible();
+  await expect(activity.getByText("revision 2").first()).toBeVisible();
+  await page.getByRole("tab", { name: "Plan", exact: true }).click();
+  await expect(page.locator(".details-tabs").getByRole("tabpanel").getByRole("heading", { name: "Your answers" })).toBeVisible();
+  await expect(page.locator(".details-tabs").getByRole("tabpanel")).toContainText("Maple & Moss needs a brand refresh");
 });
 
 test("4. duplicate replayKey returns one task", async ({ page }) => {
@@ -265,8 +289,8 @@ test("11. ingestion time and original email time are labeled separately and are 
 
   // The request tab carries both labels as well.
   await page.getByRole("tab", { name: "Original request" }).click();
-  await expect(page.getByRole("tabpanel").getByText("Original email received", { exact: true })).toBeVisible();
-  await expect(page.getByRole("tabpanel").getByText("Entered the system", { exact: true })).toBeVisible();
+  await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText("Original email received", { exact: true })).toBeVisible();
+  await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText("Entered the system", { exact: true })).toBeVisible();
 
   // Queue cards show only ingestion time, and say so.
   await page.goto("/");
@@ -291,4 +315,157 @@ test("12. keyboard: source dialog opens and closes with focus restored, and revi
   await expect(review).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Marked reviewed" })).toBeVisible();
+});
+
+test("13. a stale answers submission shows the conflict and keeps the typed text", async ({ page }) => {
+  await needEngine(page);
+  const { taskId } = await inject(page.request, "ambiguous");
+  await page.goto(`/tasks/${taskId}`);
+  await expect(statusBadge(page, "needs_input")).toBeVisible({ timeout: 90_000 });
+  const form = page.locator("form").filter({ has: page.getByRole("button", { name: /Submit answers/ }) });
+  const areas = form.locator("textarea");
+  const n = await areas.count();
+  for (let i = 0; i < n; i++) await areas.nth(i).fill(`Unsent answer ${i + 1}`);
+
+  await page.route("**/api/tasks/*/answers", async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    await route.continue({ postData: JSON.stringify({ ...body, revision: 99 }) });
+  });
+  await form.getByRole("button", { name: /Submit answers/ }).click();
+  await expect(page.getByText("This task changed. Refresh to review the latest version.").first()).toBeVisible();
+  // Nothing was applied, the form is blocked until refresh, and the text the user typed is still there.
+  expect(await taskStatus(page, taskId)).toMatchObject({ status: "needs_input", revision: 1 });
+  await expect(areas.first()).toHaveValue("Unsent answer 1");
+  await expect(form.getByRole("button", { name: /Submit answers/ })).toBeDisabled();
+  await page.unroute("**/api/tasks/*/answers");
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(areas.first()).toHaveValue("Unsent answer 1");
+  await expect(form.getByRole("button", { name: /Submit answers/ })).toBeEnabled();
+});
+
+test("14. server-side answer validation is shown and does not lose input or create a revision", async ({ page }) => {
+  await needEngine(page);
+  const { taskId } = await inject(page.request, "ambiguous");
+  await page.goto(`/tasks/${taskId}`);
+  await expect(statusBadge(page, "needs_input")).toBeVisible({ timeout: 90_000 });
+  const form = page.locator("form").filter({ has: page.getByRole("button", { name: /Submit answers/ }) });
+  const areas = form.locator("textarea");
+  const n = await areas.count();
+  for (let i = 0; i < n; i++) await areas.nth(i).fill(`Typed answer ${i + 1}`);
+
+  // Let the browser pass its own checks, then make the server see an unknown question id (a real 400).
+  await page.route("**/api/tasks/*/answers", async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as { answers: Array<{ questionId: string; answer: string }> };
+    const answers = body.answers.map((a, i) => (i === 0 ? { ...a, questionId: "not-a-real-question" } : a));
+    await route.continue({ postData: JSON.stringify({ ...body, answers }) });
+  });
+  await form.getByRole("button", { name: /Submit answers/ }).click();
+  await expect(form.getByText(/The server rejected the answers/)).toBeVisible();
+  expect(await taskStatus(page, taskId)).toMatchObject({ status: "needs_input", revision: 1 });
+  await expect(areas.first()).toHaveValue("Typed answer 1");
+  await page.unroute("**/api/tasks/*/answers");
+});
+
+test("15. a blocked notification does not hide, disable, or fail the finished work", async ({ page }) => {
+  await needEngine(page);
+  const origin = new URL(BASE).origin;
+  const patch = (data: unknown) => page.request.patch(`${BASE}/api/settings`, { headers: { origin, "content-type": "application/json" }, data });
+  expect((await patch({ notifications: { channel: "whatsapp", recipient: "+15551234567" } })).ok()).toBe(true);
+  try {
+    const { taskId } = await inject(page.request, "proposal");
+    await page.goto(`/tasks/${taskId}`);
+    await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
+    await page.getByRole("tab", { name: /^Notifications/ }).click();
+    // The operator has not enabled live WhatsApp in this stack, so the message is blocked, not sent.
+    await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText("Blocked", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText(/WHATSAPP_USE_CASE_ELIGIBLE/)).toBeVisible();
+    await expect(page.locator(".details-tabs").getByRole("tabpanel").getByText("Delivered", { exact: true })).toHaveCount(0);
+    // Files stay downloadable and the task can still be reviewed.
+    const docx = await downloadFile(page, /Download .*\.docx/);
+    expectOfficeZip(docx.bytes, "word/document.xml");
+    await page.getByRole("button", { name: "Mark reviewed" }).click();
+    await expect(page.getByRole("heading", { name: "Marked reviewed" })).toBeVisible();
+    expect((await taskStatus(page, taskId)).status).toBe("approved");
+  } finally {
+    await patch({ notifications: { channel: "outbox", recipient: null } });
+  }
+});
+
+test("16. the source dialog shows the real evidence quote, and fits a phone screen", async ({ browser, page }) => {
+  await needEngine(page);
+  const { taskId } = await inject(page.request, "proposal");
+  await page.goto(`/tasks/${taskId}`);
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
+  const res = await page.request.get(`${BASE}/api/tasks/${taskId}`);
+  const detail = ((await res.json()) as { data: { products: Array<{ blocks: Array<{ evidence: Array<{ sourceId: string; quote: string | null }> }> }>; sources: Array<{ id: string; title: string; text: string }> } }).data;
+  const ref = detail.products.flatMap((p) => p.blocks.flatMap((b) => b.evidence)).find((e) => e.quote);
+  test.skip(!ref, "BLOCKED: the engine returned evidence references with quote:null only, so there is no real quote to compare. Owner: Joanne (engine).");
+  const source = detail.sources.find((s) => s.id === ref!.sourceId)!;
+  const norm = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+  expect(norm(source.text)).toContain(norm(ref!.quote!)); // the engine's quote really is in the source
+
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
+  const m = await ctx.newPage();
+  await m.goto(`${BASE}/tasks/${taskId}`);
+  await expect(statusBadge(m, "ready")).toBeVisible();
+  await m.locator(".doc-page .chip", { hasText: source.title.slice(0, 12) }).first().click();
+  const dialog = m.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".quote").first()).toContainText(ref!.quote!.slice(0, 40));
+  await expect(dialog.getByText(/appears in the extracted source text/)).toBeVisible();
+  const box = await dialog.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  await m.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await ctx.close();
+});
+
+test("19. very long titles, filenames, text and tables wrap on a phone and keep the actions reachable", async ({ browser, page }) => {
+  // The real API response is fetched and then padded with hostile-length strings, so this exercises layout only.
+  await needEngine(page);
+  const { taskId } = await inject(page.request, "proposal");
+  await page.goto(`/tasks/${taskId}`);
+  await expect(statusBadge(page, "ready")).toBeVisible({ timeout: 90_000 });
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
+  const m = await ctx.newPage();
+  const long = "Supercalifragilistic".repeat(12);
+  await m.route(`**/api/tasks/${taskId}`, async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { data: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const d = body.data;
+    d.task.title = long;
+    d.task.subject = long;
+    d.email.subject = long;
+    d.email.bodyText = long.repeat(5);
+    for (const a of d.artifacts) a.filename = `${long}.${a.format}`;
+    const first = d.products[0].blocks[0];
+    first.text = long.repeat(4);
+    d.products[0].blocks.push({
+      id: "wide", kind: "table", heading: long, text: null, items: [], columns: Array.from({ length: 8 }, (_, i) => `Column ${i + 1} ${long}`),
+      rows: [Array.from({ length: 8 }, () => long)], chart: null, evidence: [], basis: "recommendation",
+    });
+    await route.fulfill({ response: res, json: body });
+  });
+  await m.goto(`${BASE}/tasks/${taskId}`);
+  await expect(statusBadge(m, "ready")).toBeVisible();
+  // Name the offending elements (outside scrollable containers) so a failure points at the cause.
+  const offenders = await m.evaluate(() =>
+    [...document.querySelectorAll("body *")]
+      .filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1 && !e.parentElement?.closest(".table-scroll, .email-body, .thumbs, .toasts") && !e.closest(".skip-link"))
+      .slice(0, 8)
+      .map((e) => `${e.tagName.toLowerCase()}.${String(e.className).slice(0, 40)} right=${Math.round(e.getBoundingClientRect().right)}`),
+  );
+  expect(offenders).toEqual([]);
+  expect(await m.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  const review = m.getByRole("button", { name: "Mark reviewed" });
+  await review.scrollIntoViewIfNeeded();
+  const box = await review.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  await m.getByRole("button", { name: /^Download/ }).first().scrollIntoViewIfNeeded();
+  await m.goto(`${BASE}/`);
+  await expect(m.getByRole("heading", { name: "Work queue" })).toBeVisible();
+  expect(await m.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await ctx.close();
 });

@@ -1,5 +1,5 @@
 import type { ContentBlock } from "@afterhours/contracts";
-import { formatNumber, truncate } from "@/lib/format";
+import { formatNumber, truncate } from "../../lib/format";
 
 type ChartData = NonNullable<ContentBlock["chart"]>;
 const COLORS = ["#0f766e", "#102a43", "#b45309", "#7c3aed"];

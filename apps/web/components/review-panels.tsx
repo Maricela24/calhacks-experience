@@ -1,5 +1,5 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { AlertTriangle, BadgeCheck, CircleHelp, Loader2, RefreshCw, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -134,23 +134,50 @@ export function ClosePanel({ detail }: { detail: TaskDetail }) {
 
 const MAX_ANSWER = 2000;
 
+/** Answers the user gave in earlier rounds, shown with the question text when the current plan still carries it. */
+export function EarlierAnswers({ detail, title = "Your earlier answers", all = false }: { detail: TaskDetail; title?: string; all?: boolean }) {
+  const known = new Map((detail.plan?.questions ?? []).map((q) => [q.id, q.question]));
+  const current = new Set(detail.questions.map((q) => q.id));
+  const rows = all ? detail.answers : detail.answers.filter((a) => !current.has(a.questionId));
+  if (rows.length === 0) return null;
+  return (
+    <div className="earlier-answers">
+      <h3 className="h4">{title}</h3>
+      <ul className="plain stack-sm">
+        {rows.map((a) => (
+          <li key={a.questionId} className="card card-flat">
+            <p className="muted small">{known.get(a.questionId) ?? `Earlier question (${a.questionId})`}</p>
+            <p className="wrap-anywhere">{a.answer}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function NeedsInputPanel({ detail }: { detail: TaskDetail }) {
   const { task } = detail;
   const questions = detail.questions.length > 0 ? detail.questions : detail.plan?.questions ?? [];
   const submit = useSubmitAnswers(task.id);
   const toast = useToast();
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(detail.answers.map((a) => [a.questionId, a.answer])),
-  );
+  // Only what the user typed lives here. Retained server answers fill the fields the user has not touched, so a
+  // background refresh or a new revision never discards unsent text.
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const retained = new Map(detail.answers.map((a) => [a.questionId, a.answer]));
+  const valueOf = (id: string) => edits[id] ?? retained.get(id) ?? "";
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
+  const inFlight = useRef(false);
+  const firstRevision = useRef(task.revision);
+  const revisionChanged = task.revision !== firstRevision.current;
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (inFlight.current) return;
     const errs: Record<string, string> = {};
     for (const q of questions) {
-      const v = (values[q.id] ?? "").trim();
+      const v = valueOf(q.id).trim();
       if (q.required && !v) errs[q.id] = "This answer is required.";
       else if (v.length > MAX_ANSWER) errs[q.id] = `Keep this under ${MAX_ANSWER} characters.`;
     }
@@ -158,15 +185,17 @@ export function NeedsInputPanel({ detail }: { detail: TaskDetail }) {
     setFormError(null);
     if (Object.keys(errs).length > 0) return;
     const answers: WorkAnswer[] = questions
-      .map((q) => ({ questionId: q.id, answer: (values[q.id] ?? "").trim() }))
+      .map((q) => ({ questionId: q.id, answer: valueOf(q.id).trim() }))
       .filter((a) => a.answer.length > 0);
     if (answers.length === 0) { setFormError("Answer at least one question."); return; }
+    inFlight.current = true;
     submit.mutate({ revision: task.revision, answers }, {
       onSuccess: () => toast.push("success", "Answers submitted. Preparation is resuming as a new revision."),
       onError: (err) => {
         if (isStale(err)) setStale(true);
-        else setFormError(err instanceof ApiError && err.status === 400 ? err.message : describeError(err));
+        else setFormError(err instanceof ApiError && err.status === 400 ? `The server rejected the answers: ${err.message}` : describeError(err));
       },
+      onSettled: () => { inFlight.current = false; },
     });
   }
 
@@ -176,6 +205,9 @@ export function NeedsInputPanel({ detail }: { detail: TaskDetail }) {
       <form onSubmit={onSubmit} className="grow" noValidate>
         <h2 id="ni-h" className="h3">AfterHours needs a few answers</h2>
         <p className="muted">The request is missing information that affects the work. Your answers create a new revision and preparation resumes. Earlier answers stay on record.</p>
+        {revisionChanged && (
+          <p className="banner banner-info" role="status">This task moved to revision {task.revision}. Check the questions below; your unsent text was kept.</p>
+        )}
         {stale && <StaleBanner taskId={task.id} onDone={() => setStale(false)} />}
         {questions.length === 0 && <p>No specific questions were recorded. Open the Plan tab for details.</p>}
         {questions.map((q) => {
@@ -185,8 +217,8 @@ export function NeedsInputPanel({ detail }: { detail: TaskDetail }) {
               <label htmlFor={`q-${q.id}`}>{q.question} {q.required ? <span className="req">Required</span> : <span className="muted small">Optional</span>}</label>
               <p className="muted small" id={`why-${q.id}`}>Why we ask: {q.reason}</p>
               <textarea
-                id={`q-${q.id}`} rows={3} maxLength={MAX_ANSWER + 200} value={values[q.id] ?? ""}
-                onChange={(e) => setValues((v) => ({ ...v, [q.id]: e.target.value }))}
+                id={`q-${q.id}`} rows={3} maxLength={MAX_ANSWER + 200} value={valueOf(q.id)}
+                onChange={(e) => setEdits((v) => ({ ...v, [q.id]: e.target.value }))}
                 aria-invalid={err ? true : undefined}
                 aria-describedby={`why-${q.id}${err ? ` err-${q.id}` : ""}`}
               />
@@ -200,6 +232,7 @@ export function NeedsInputPanel({ detail }: { detail: TaskDetail }) {
             {submit.isPending ? <><Loader2 size={16} className="spin" aria-hidden />Submitting…</> : "Submit answers and resume"}
           </button>
         </div>
+        <EarlierAnswers detail={detail} />
       </form>
     </section>
   );
@@ -211,6 +244,7 @@ export function FailedPanel({ detail }: { detail: TaskDetail }) {
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
+  const inFlight = useRef(false);
   const config = isConfigError(task.error?.code);
   return (
     <section className="panel panel-error" aria-labelledby="fail-h">
@@ -227,16 +261,20 @@ export function FailedPanel({ detail }: { detail: TaskDetail }) {
           </div>
         )}
         {!config && task.error && !task.error.retryable && <p className="muted small">This kind of failure usually repeats until the cause is fixed.</p>}
+        {!config && task.error?.retryable && <p className="muted small">This looked temporary, but the automatic retries were used up. A manual retry starts a new revision.</p>}
         {stale && <StaleBanner taskId={task.id} onDone={() => setStale(false)} />}
         {error && <p className="field-error" role="alert">{error}</p>}
         <div className="actions">
           <button
             type="button" className="btn btn-primary" disabled={retry.isPending || stale}
             onClick={() => {
+              if (inFlight.current) return;
+              inFlight.current = true;
               setError(null);
               retry.mutate({ revision: task.revision }, {
                 onSuccess: () => toast.push("success", "Retry queued as a new revision."),
                 onError: (e) => { if (isStale(e)) setStale(true); else setError(describeError(e)); },
+                onSettled: () => { inFlight.current = false; },
               });
             }}
           >

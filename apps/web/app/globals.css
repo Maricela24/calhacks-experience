@@ -324,3 +324,9 @@ input:disabled, select:disabled { background: #eef2f6; color: var(--ink-2); }
   .page-head .menu-wrap { width: 100%; }
   .page-head .menu-wrap > .btn { width: 100%; }
 }
+
+/* Flex/grid children default to min-width:auto, so one unbreakable word or wide table could stretch the page.
+   Letting them shrink keeps long content inside its own scroll or wrap area. */
+.content > *, .stack > *, .stack-sm > *, .card, .panel > *, .block, .doc-page, .preview, .deck, .slide, .slide-body,
+.slide-cols > div, .file-info, .grow, .page-head > *, .card-head > *, .callout > *, .banner > *, .summary > div { min-width: 0; }
+.card-title, .doc-title, h1, h2, h3, h4, .block-text, .block-heading, .file-name, .thumb-title, .summary dd { overflow-wrap: anywhere; }

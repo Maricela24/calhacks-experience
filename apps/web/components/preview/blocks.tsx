@@ -1,7 +1,7 @@
 "use client";
 import { AlertTriangle, FileSearch } from "lucide-react";
 import type { ContentBlock, SourceRef } from "@afterhours/contracts";
-import { truncate } from "@/lib/format";
+import { truncate } from "../../lib/format";
 import { ChartView } from "./chart";
 import { usePreview } from "./context";
 

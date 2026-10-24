@@ -10,7 +10,7 @@ import { GenerationBadge, IngestionBadge, StatusBadge } from "./badges";
 import { FileCard } from "./files";
 import { NotificationRow } from "./notification-row";
 import { ProductPreview } from "./preview/product-preview";
-import { ClosePanel, FailedPanel, NeedsInputPanel, ReviewPanel } from "./review-panels";
+import { ClosePanel, EarlierAnswers, FailedPanel, NeedsInputPanel, ReviewPanel } from "./review-panels";
 import { useShell } from "./shell";
 import { ErrorPanel, NotFoundPanel, SkeletonCards } from "./states";
 import { Tabs } from "./tabs";
@@ -74,6 +74,7 @@ function PlanTab({ detail, tz }: { detail: TaskDetail; tz?: string }) {
       <p>{plan.dueAt ? formatDateTime(plan.dueAt, tz) : "No due date was stated."}{plan.dueAtExplanation ? ` ${plan.dueAtExplanation}` : ""}</p>
       {plan.steps.length > 0 && (<><h3 className="h4">Steps</h3><ol>{plan.steps.map((s, i) => <li key={i}>{s}</li>)}</ol></>)}
       {plan.assumptions.length > 0 && (<><h3 className="h4">Assumptions</h3><ul>{plan.assumptions.map((s, i) => <li key={i}>{s}</li>)}</ul></>)}
+      {detail.answers.length > 0 && task.status !== "needs_input" && <EarlierAnswers detail={detail} title="Your answers" all />}
       {plan.questions.length > 0 && (
         <>
           <h3 className="h4">Questions</h3>
@@ -208,7 +209,7 @@ export function TaskDetailView({ id }: { id: string }) {
       )}
 
       {isActive(task.status) && <ActiveProgress detail={detail} tz={tz} />}
-      {task.status === "needs_input" && <NeedsInputPanel key={`${task.id}-${task.revision}`} detail={detail} />}
+      {task.status === "needs_input" && <NeedsInputPanel detail={detail} />}
       {task.status === "failed" && <FailedPanel detail={detail} />}
       {task.status === "skipped" && (
         <section className="panel panel-empty">

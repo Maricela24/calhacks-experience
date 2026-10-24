@@ -2,7 +2,7 @@
 import { useEffect, useRef } from "react";
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import type { SourceDocument, SourceRef } from "@afterhours/contracts";
-import { normalizeWs } from "@/lib/format";
+import { normalizeWs } from "../../lib/format";
 
 /** Whether the recorded excerpt really appears in the extracted source text (whitespace/case-normalized). */
 export function quoteMatches(ref: SourceRef, source: SourceDocument | undefined): boolean | null {

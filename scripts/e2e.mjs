@@ -10,6 +10,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 const root = path.resolve(import.meta.dirname, "..");
 const WEB_PORT = process.env.E2E_WEB_PORT ?? "3100";
 const API_PORT = process.env.E2E_API_PORT ?? "4100";
+const FAIL_WEB_PORT = process.env.E2E_FAIL_WEB_PORT ?? "3101";
+const FAIL_API_PORT = process.env.E2E_FAIL_API_PORT ?? "4101";
 const tmp = mkdtempSync(path.join(tmpdir(), "afterhours-e2e-"));
 const password = `e2e-${randomBytes(6).toString("hex")}`;
 const cliToken = randomBytes(24).toString("base64url");
@@ -39,9 +41,28 @@ const env = {
   E2E_CLI_TOKEN: cliToken,
 };
 
+// Second, separate stack on 127.0.0.1 (cookies are per host, so it cannot clobber the first stack's session) whose
+// model is live but has no credentials. Every task there fails with MODEL_NOT_CONFIGURED: a real failure path.
+const failEnv = {
+  ...env,
+  PUBLIC_APP_URL: `http://127.0.0.1:${FAIL_WEB_PORT}`,
+  API_ORIGIN: `http://127.0.0.1:${FAIL_API_PORT}`,
+  API_PORT: FAIL_API_PORT,
+  DATABASE_PATH: path.join(tmp, "e2e-fail.sqlite"),
+  ARTIFACTS_DIR: path.join(tmp, "artifacts-fail"),
+  GENERATION_MODE: "live",
+  MODEL_PROVIDER: "openai",
+  MODEL_NAME: "",
+  OPENAI_API_KEY: "",
+  ANTHROPIC_API_KEY: "",
+  E2E_FAIL_BASE_URL: `http://127.0.0.1:${FAIL_WEB_PORT}`,
+  NEXT_DIST_DIR: ".next-e2e-fail",
+};
+env.E2E_FAIL_BASE_URL = failEnv.E2E_FAIL_BASE_URL;
+
 const children = [];
-function start(name, args) {
-  const child = spawn("pnpm", args, { cwd: root, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+function start(name, args, childEnv = env) {
+  const child = spawn("pnpm", args, { cwd: root, env: childEnv, detached: true, stdio: ["ignore", "pipe", "pipe"] });
   const log = [];
   for (const s of [child.stdout, child.stderr]) s.on("data", (d) => { log.push(String(d)); if (log.length > 200) log.shift(); });
   child.log = log;
@@ -49,14 +70,20 @@ function start(name, args) {
   children.push(child);
   return child;
 }
-function cleanup() {
+function stopChildren() {
   for (const c of children) {
     try { process.kill(-c.pid, "SIGTERM"); } catch { /* already gone */ }
   }
-  rmSync(tmp, { recursive: true, force: true });
 }
-process.on("SIGINT", () => { cleanup(); process.exit(130); });
-process.on("SIGTERM", () => { cleanup(); process.exit(143); });
+async function cleanup() {
+  stopChildren();
+  await sleep(2000); // let the dev servers release their files before deleting them
+  for (const dir of [path.join(root, "apps/web/.next-e2e-fail"), tmp]) {
+    try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* best effort; the folder is git-ignored or temporary */ }
+  }
+}
+process.on("SIGINT", async () => { await cleanup(); process.exit(130); });
+process.on("SIGTERM", async () => { await cleanup(); process.exit(143); });
 
 async function waitFor(url, label, ms = 180_000) {
   const t0 = Date.now();
@@ -79,11 +106,20 @@ try {
     const r = spawnSync("pnpm", [step], { cwd: root, env, stdio: "pipe" });
     if (r.status !== 0) throw new Error(`pnpm ${step} failed:\n${r.stdout}${r.stderr}`);
   }
+  for (const step of ["db:migrate", "db:seed"]) {
+    const r = spawnSync("pnpm", [step], { cwd: root, env: failEnv, stdio: "pipe" });
+    if (r.status !== 0) throw new Error(`pnpm ${step} (failure stack) failed:\n${r.stdout}${r.stderr}`);
+  }
   start("api", ["--filter", "@afterhours/api", "exec", "tsx", "src/main.ts"]);
   start("worker", ["--filter", "@afterhours/worker", "exec", "tsx", "src/main.ts"]);
   start("web", ["--filter", "@afterhours/web", "exec", "next", "dev", "-p", WEB_PORT]);
+  start("api-fail", ["--filter", "@afterhours/api", "exec", "tsx", "src/main.ts"], failEnv);
+  start("worker-fail", ["--filter", "@afterhours/worker", "exec", "tsx", "src/main.ts"], failEnv);
+  start("web-fail", ["--filter", "@afterhours/web", "exec", "next", "dev", "-p", FAIL_WEB_PORT, "--hostname", "127.0.0.1"], failEnv);
   await waitFor(`http://127.0.0.1:${API_PORT}/health`, "API");
   await waitFor(`http://localhost:${WEB_PORT}/login`, "web app");
+  await waitFor(`http://127.0.0.1:${FAIL_API_PORT}/health`, "failure-stack API");
+  await waitFor(`http://127.0.0.1:${FAIL_WEB_PORT}/login`, "failure-stack web app");
   console.log(`E2E stack ready (web :${WEB_PORT}, api :${API_PORT}, storage ${tmp})`);
   const run = spawnSync(
     "pnpm",
@@ -112,6 +148,6 @@ try {
 } catch (e) {
   console.error(e instanceof Error ? e.message : e);
 } finally {
-  cleanup();
+  await cleanup();
 }
 process.exit(code);
