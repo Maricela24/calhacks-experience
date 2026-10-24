@@ -45,3 +45,29 @@ export function allAmbiguousAnswers(input: EngineInput): boolean {
   const values = new Map(input.answers.map((answer) => [answer.questionId, answer.answer.trim()]));
   return AMBIGUOUS_QUESTIONS.every((question) => values.get(question.id));
 }
+
+const SLIDE_WORDS: Record<string, number> = { three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+/** Slide count stated in the request ("five-slide", "5 slides"), or null when unstated. */
+export function requestedSlideCount(text: string): number | null {
+  const match = text.match(/\b(three|four|five|six|seven|eight|nine|ten|\d{1,2})[ -]slides?\b/i);
+  if (!match) return null;
+  return SLIDE_WORDS[match[1]!.toLowerCase()] ?? Number(match[1]);
+}
+
+const MONEY_ANSWER = /(?:\b(?:USD|EUR|GBP|CAD|AUD)\s?|[$€£])\s?\d/i;
+const ANSWER_LIMITS: Record<string, number> = { client_identity: 80, project_scope: 600, authorized_fee: 80, project_schedule: 160 };
+/**
+ * Answers are untrusted data. Ones that cannot be used safely (too long for titles, or a fee
+ * without an amount and currency) are asked again with a specific reason instead of guessed.
+ */
+export function unusableAnswers(input: EngineInput): WorkQuestion[] {
+  const values = new Map(input.answers.map((answer) => [answer.questionId, answer.answer.trim()]));
+  const again: WorkQuestion[] = [];
+  for (const question of AMBIGUOUS_QUESTIONS) {
+    const value = values.get(question.id) ?? "";
+    const limit = ANSWER_LIMITS[question.id]!;
+    if (value.length > limit) again.push({ ...question, reason: `The previous answer was ${value.length} characters; please answer in at most ${limit}.` });
+    else if (question.id === "authorized_fee" && !MONEY_ANSWER.test(value)) again.push({ ...question, reason: "The previous answer did not state an amount with a currency, such as USD 6,000." });
+  }
+  return again;
+}
