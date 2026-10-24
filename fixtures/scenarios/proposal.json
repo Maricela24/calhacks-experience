@@ -1,0 +1,31 @@
+{
+  "scenario": "proposal",
+  "email": {
+    "providerMessageId": "placeholder",
+    "providerThreadId": null,
+    "from": {
+      "name": "Jordan Lee",
+      "email": "jordan@client.example"
+    },
+    "to": [
+      "team@harbor.example"
+    ],
+    "subject": "Proposal and kickoff deck for Maple & Moss",
+    "receivedAt": "2026-01-12T17:00:00.000Z",
+    "bodyText": "FOUNDATION PLACEHOLDER (Person 2 owns): Please prepare a project proposal and a five-slide kickoff deck. Brief attached.",
+    "attachments": [
+      {
+        "id": "att-brief",
+        "filename": "maple-and-moss-brief.md",
+        "mimeType": "text/markdown",
+        "sizeBytes": 233
+      }
+    ]
+  },
+  "attachmentFiles": [
+    {
+      "attachmentId": "att-brief",
+      "relativePath": "attachments/maple-and-moss-brief.md"
+    }
+  ]
+}

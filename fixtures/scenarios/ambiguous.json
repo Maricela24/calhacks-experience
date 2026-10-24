@@ -1,0 +1,19 @@
+{
+  "scenario": "ambiguous",
+  "email": {
+    "providerMessageId": "placeholder",
+    "providerThreadId": null,
+    "from": {
+      "name": "Jordan Lee",
+      "email": "jordan@client.example"
+    },
+    "to": [
+      "team@harbor.example"
+    ],
+    "subject": "Proposal",
+    "receivedAt": "2026-01-12T17:00:00.000Z",
+    "bodyText": "FOUNDATION PLACEHOLDER (Person 2 owns): Prepare the proposal.",
+    "attachments": []
+  },
+  "attachmentFiles": []
+}

@@ -1,0 +1,41 @@
+{
+  "name": "afterhours",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.4",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "setup:local": "tsx scripts/setup-local.ts",
+    "db:migrate": "tsx scripts/db.ts migrate",
+    "db:seed": "tsx scripts/db.ts seed",
+    "db:reset": "tsx scripts/db.ts reset",
+    "check:ready": "tsx scripts/ready.ts",
+    "dev": "concurrently -n web,api,worker -c cyan,green,magenta \"pnpm dev:web\" \"pnpm dev:api\" \"pnpm dev:worker\"",
+    "dev:web": "pnpm --filter @afterhours/web dev",
+    "dev:api": "pnpm --filter @afterhours/api dev",
+    "dev:worker": "pnpm --filter @afterhours/worker dev",
+    "demo:proposal": "tsx scripts/demo.ts proposal",
+    "demo:report": "tsx scripts/demo.ts report",
+    "test": "vitest run",
+    "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
+    "lint": "eslint .",
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "test:e2e": "node scripts/e2e.mjs"
+  },
+  "devDependencies": {
+    "@afterhours/contracts": "workspace:*",
+    "@afterhours/data": "workspace:*",
+    "@afterhours/delivery": "workspace:*",
+    "@afterhours/engine": "workspace:*",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.19.0",
+    "concurrently": "^10.0.6",
+    "eslint": "^10.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^4.1.12"
+  }
+}

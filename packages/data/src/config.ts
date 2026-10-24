@@ -1,0 +1,164 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { z } from "zod";
+
+/** Walk up from `start` until pnpm-workspace.yaml is found. */
+export function findRepoRoot(start: string = process.cwd()): string {
+  let dir = path.resolve(start);
+  for (;;) {
+    if (existsSync(path.join(dir, "pnpm-workspace.yaml"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error(`Repository root (pnpm-workspace.yaml) not found from ${start}`);
+    dir = parent;
+  }
+}
+
+/** Load the root .env if present. Never overrides variables already set. */
+export function loadRootEnv(root: string = findRepoRoot()): void {
+  const file = path.join(root, ".env");
+  if (existsSync(file)) process.loadEnvFile(file);
+}
+
+const blank = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+const optStr = z.preprocess(blank, z.string().optional());
+const bool = (def: boolean) =>
+  z.preprocess(blank, z.enum(["true", "false"]).optional()).transform((v) => (v === undefined ? def : v === "true"));
+
+const EnvSchema = z.object({
+  NODE_ENV: z.preprocess(blank, z.enum(["development", "test", "production"]).default("development")),
+  PUBLIC_APP_URL: z.preprocess(blank, z.string().url().default("http://localhost:3000")),
+  API_ORIGIN: z.preprocess(blank, z.string().url().default("http://127.0.0.1:4000")),
+  API_PORT: z.preprocess(blank, z.coerce.number().int().min(1).max(65535).default(4000)),
+  DATABASE_PATH: z.preprocess(blank, z.string().default("./var/afterhours.sqlite")),
+  ARTIFACTS_DIR: z.preprocess(blank, z.string().default("./var/artifacts")),
+  SESSION_SECRET: z.preprocess(blank, z.string().min(16, "must be at least 16 characters")),
+  APP_PASSWORD: z.preprocess(blank, z.string().min(8, "must be at least 8 characters")),
+  TOKEN_ENCRYPTION_KEY: z.preprocess(blank, z.string()),
+  DEMO_ENABLED: bool(false),
+  DEMO_CLI_TOKEN: optStr,
+  GENERATION_MODE: z.preprocess(blank, z.enum(["fixture", "live"]).default("fixture")),
+  MODEL_PROVIDER: z.preprocess(blank, z.enum(["fixture", "openai", "anthropic"]).default("fixture")),
+  MODEL_NAME: optStr,
+  OPENAI_API_KEY: optStr,
+  ANTHROPIC_API_KEY: optStr,
+  GOOGLE_CLIENT_ID: optStr,
+  GOOGLE_CLIENT_SECRET: optStr,
+  GOOGLE_REDIRECT_URI: z.preprocess(blank, z.string().default("http://localhost:3000/api/integrations/gmail/callback")),
+  GMAIL_POLL_INTERVAL_SECONDS: z.preprocess(blank, z.coerce.number().int().min(5).max(3600).default(15)),
+  NOTIFICATION_CHANNEL: z.preprocess(blank, z.enum(["outbox", "whatsapp"]).default("outbox")),
+  WHATSAPP_USE_CASE_ELIGIBLE: bool(false),
+  WHATSAPP_CUSTOMER_SERVICE_WINDOW_UNTIL: optStr,
+  TWILIO_ACCOUNT_SID: optStr,
+  TWILIO_AUTH_TOKEN: optStr,
+  TWILIO_WHATSAPP_FROM: optStr,
+  TWILIO_WHATSAPP_TO: optStr,
+  TWILIO_CONTENT_SID: optStr,
+});
+
+export interface AppConfig {
+  repoRoot: string;
+  nodeEnv: "development" | "test" | "production";
+  publicAppUrl: string;
+  apiOrigin: string;
+  apiPort: number;
+  databasePath: string;
+  artifactsDir: string;
+  sessionSecret: string;
+  appPassword: string;
+  tokenEncryptionKey: Buffer;
+  demoEnabled: boolean;
+  demoCliToken: string | null;
+  generationMode: "fixture" | "live";
+  modelProvider: "fixture" | "openai" | "anthropic";
+  modelName: string | null;
+  openaiApiKey: string | null;
+  anthropicApiKey: string | null;
+  google: { clientId: string | null; clientSecret: string | null; redirectUri: string };
+  gmailPollIntervalSeconds: number;
+  notificationChannel: "outbox" | "whatsapp";
+  whatsapp: {
+    useCaseEligible: boolean;
+    customerServiceWindowUntil: string | null;
+    twilioAccountSid: string | null;
+    twilioAuthToken: string | null;
+    from: string | null;
+    to: string | null;
+    contentSid: string | null;
+  };
+}
+
+export class ConfigError extends Error {}
+
+/**
+ * Validate core runtime configuration. Throws ConfigError for invalid core settings
+ * (database/session/encryption). Missing optional provider settings never throw.
+ */
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoRoot: string = findRepoRoot()): AppConfig {
+  const parsed = EnvSchema.safeParse(env);
+  if (!parsed.success) {
+    const lines = parsed.error.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`);
+    throw new ConfigError(`Invalid configuration (run "pnpm setup:local" to generate secrets):\n${lines.join("\n")}`);
+  }
+  const e = parsed.data;
+  const key = Buffer.from(e.TOKEN_ENCRYPTION_KEY, "base64");
+  if (key.length !== 32) {
+    throw new ConfigError(
+      'Invalid configuration: TOKEN_ENCRYPTION_KEY must be base64 for exactly 32 bytes (run "pnpm setup:local").',
+    );
+  }
+  const abs = (p: string) => (path.isAbsolute(p) ? p : path.resolve(repoRoot, p));
+  return {
+    repoRoot,
+    nodeEnv: e.NODE_ENV,
+    publicAppUrl: e.PUBLIC_APP_URL.replace(/\/$/, ""),
+    apiOrigin: e.API_ORIGIN,
+    apiPort: e.API_PORT,
+    databasePath: abs(e.DATABASE_PATH),
+    artifactsDir: abs(e.ARTIFACTS_DIR),
+    sessionSecret: e.SESSION_SECRET,
+    appPassword: e.APP_PASSWORD,
+    tokenEncryptionKey: key,
+    demoEnabled: e.DEMO_ENABLED,
+    demoCliToken: e.DEMO_CLI_TOKEN ?? null,
+    generationMode: e.GENERATION_MODE,
+    modelProvider: e.GENERATION_MODE === "fixture" ? "fixture" : e.MODEL_PROVIDER,
+    modelName: e.MODEL_NAME ?? null,
+    openaiApiKey: e.OPENAI_API_KEY ?? null,
+    anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
+    google: {
+      clientId: e.GOOGLE_CLIENT_ID ?? null,
+      clientSecret: e.GOOGLE_CLIENT_SECRET ?? null,
+      redirectUri: e.GOOGLE_REDIRECT_URI,
+    },
+    gmailPollIntervalSeconds: e.GMAIL_POLL_INTERVAL_SECONDS,
+    notificationChannel: e.NOTIFICATION_CHANNEL,
+    whatsapp: {
+      useCaseEligible: e.WHATSAPP_USE_CASE_ELIGIBLE,
+      customerServiceWindowUntil: e.WHATSAPP_CUSTOMER_SERVICE_WINDOW_UNTIL ?? null,
+      twilioAccountSid: e.TWILIO_ACCOUNT_SID ?? null,
+      twilioAuthToken: e.TWILIO_AUTH_TOKEN ?? null,
+      from: e.TWILIO_WHATSAPP_FROM ?? null,
+      to: e.TWILIO_WHATSAPP_TO ?? null,
+      contentSid: e.TWILIO_CONTENT_SID ?? null,
+    },
+  };
+}
+
+/** Live model configuration status. Fixture mode is always "configured". */
+export function modelStatus(c: AppConfig) {
+  if (c.generationMode === "fixture") {
+    return { mode: "fixture" as const, provider: "fixture" as const, configured: true, model: null };
+  }
+  const key = c.modelProvider === "openai" ? c.openaiApiKey : c.modelProvider === "anthropic" ? c.anthropicApiKey : null;
+  return {
+    mode: "live" as const,
+    provider: c.modelProvider,
+    configured: c.modelProvider !== "fixture" && !!key,
+    model: c.modelName,
+  };
+}
+
+export function whatsappConfigured(c: AppConfig): boolean {
+  const w = c.whatsapp;
+  return !!(w.twilioAccountSid && w.twilioAuthToken && w.from);
+}

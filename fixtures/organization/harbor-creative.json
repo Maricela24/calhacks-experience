@@ -1,0 +1,10 @@
+{
+  "id": "org-harbor-creative",
+  "name": "Harbor Creative (fictional)",
+  "description": "A small fictional design and strategy studio used only for demonstrations.",
+  "timezone": "America/Los_Angeles",
+  "currency": "USD",
+  "backgroundText": "Harbor Creative is a fictional 8-person studio that builds brand and web projects for small businesses. FOUNDATION PLACEHOLDER: Person 2 owns the final text.",
+  "policiesText": "Proposals state assumptions explicitly. No commitments are made without a confirmed scope. FOUNDATION PLACEHOLDER.",
+  "brand": { "primaryColor": "#1F4E5F", "accentColor": "#E07A3F", "fontFamily": "Calibri" }
+}

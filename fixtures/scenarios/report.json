@@ -1,0 +1,31 @@
+{
+  "scenario": "report",
+  "email": {
+    "providerMessageId": "placeholder",
+    "providerThreadId": null,
+    "from": {
+      "name": "Jordan Lee",
+      "email": "jordan@client.example"
+    },
+    "to": [
+      "team@harbor.example"
+    ],
+    "subject": "January vs February sales report",
+    "receivedAt": "2026-01-12T17:00:00.000Z",
+    "bodyText": "FOUNDATION PLACEHOLDER (Person 2 owns): Attached is our sales CSV. Please prepare a short performance report and slides.",
+    "attachments": [
+      {
+        "id": "att-sales",
+        "filename": "sales.csv",
+        "mimeType": "text/csv",
+        "sizeBytes": 46
+      }
+    ]
+  },
+  "attachmentFiles": [
+    {
+      "attachmentId": "att-sales",
+      "relativePath": "attachments/sales.csv"
+    }
+  ]
+}
