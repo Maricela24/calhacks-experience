@@ -1,3 +1,5 @@
-month,revenue_usd
-2025-01,12000
-2025-02,15000
+month,channel,revenue_usd,orders
+2026-01,Website,8000,80
+2026-01,Partnerships,4000,40
+2026-02,Website,10000,100
+2026-02,Partnerships,5000,50

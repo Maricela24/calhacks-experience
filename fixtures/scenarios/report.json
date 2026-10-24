@@ -1,31 +1,18 @@
 {
   "scenario": "report",
   "email": {
-    "providerMessageId": "placeholder",
-    "providerThreadId": null,
-    "from": {
-      "name": "Jordan Lee",
-      "email": "jordan@client.example"
-    },
-    "to": [
-      "team@harbor.example"
-    ],
-    "subject": "January vs February sales report",
-    "receivedAt": "2026-01-12T17:00:00.000Z",
-    "bodyText": "FOUNDATION PLACEHOLDER (Person 2 owns): Attached is our sales CSV. Please prepare a short performance report and slides.",
+    "providerMessageId": "demo-report-base",
+    "providerThreadId": "demo-thread-sales",
+    "from": { "name": "Morgan Lee", "email": "morgan@harbor-client.example" },
+    "to": ["team@harbor-creative.example"],
+    "subject": "January-February sales report and five-slide update",
+    "receivedAt": "2026-10-23T19:00:00.000Z",
+    "bodyText": "Please prepare a short sales report DOCX and a five-slide PPTX with a month-over-month comparison based only on the attached CSV. Do not infer causes that the dataset cannot establish.",
     "attachments": [
-      {
-        "id": "att-sales",
-        "filename": "sales.csv",
-        "mimeType": "text/csv",
-        "sizeBytes": 46
-      }
+      { "id": "att-sales", "filename": "sales.csv", "mimeType": "text/csv", "sizeBytes": 141 }
     ]
   },
   "attachmentFiles": [
-    {
-      "attachmentId": "att-sales",
-      "relativePath": "attachments/sales.csv"
-    }
+    { "attachmentId": "att-sales", "relativePath": "attachments/sales.csv" }
   ]
 }

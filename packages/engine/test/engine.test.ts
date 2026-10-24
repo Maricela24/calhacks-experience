@@ -1,0 +1,158 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { inflateRawSync } from "node:zlib";
+import { describe, expect, it } from "vitest";
+import type { DemoFixture, EngineInput, OrganizationProfile } from "@afterhours/contracts";
+import { calculateSales, EngineError, runWork } from "../src/index";
+
+const root = resolve(import.meta.dirname, "../../..");
+const loadJson = async <T>(path: string): Promise<T> => JSON.parse(await readFile(resolve(root, path), "utf8")) as T;
+
+async function inputFor(scenario: DemoFixture["scenario"], overrides: Partial<EngineInput> = {}): Promise<EngineInput> {
+  const fixture = await loadJson<DemoFixture>(`fixtures/scenarios/${scenario}.json`);
+  const organization = await loadJson<OrganizationProfile>("fixtures/organization/harbor-creative.json");
+  const attachments = await Promise.all(fixture.attachmentFiles.map(async (entry) => {
+    const meta = fixture.email.attachments.find((item) => item.id === entry.attachmentId)!;
+    return { id: meta.id, filename: meta.filename, mimeType: meta.mimeType, bytes: new Uint8Array(await readFile(resolve(root, "fixtures", entry.relativePath))) };
+  }));
+  return { taskId: `task-${scenario}`, revision: 1, mode: "fixture", email: fixture.email, attachments, organization, answers: [], now: "2026-10-23T20:00:00.000Z", fixtureScenario: scenario, ...overrides };
+}
+
+const deps = () => ({ onProgress: async () => undefined, signal: new AbortController().signal });
+
+function unzip(bytes: Uint8Array): Map<string, Uint8Array> {
+  const buffer = Buffer.from(bytes);
+  let eocd = buffer.length - 22;
+  while (eocd >= 0 && buffer.readUInt32LE(eocd) !== 0x06054b50) eocd -= 1;
+  if (eocd < 0) throw new Error("Missing ZIP end record");
+  const count = buffer.readUInt16LE(eocd + 10);
+  let cursor = buffer.readUInt32LE(eocd + 16);
+  const entries = new Map<string, Uint8Array>();
+  for (let index = 0; index < count; index += 1) {
+    if (buffer.readUInt32LE(cursor) !== 0x02014b50) throw new Error("Invalid ZIP directory");
+    const method = buffer.readUInt16LE(cursor + 10);
+    const compressedSize = buffer.readUInt32LE(cursor + 20);
+    const filenameLength = buffer.readUInt16LE(cursor + 28);
+    const extraLength = buffer.readUInt16LE(cursor + 30);
+    const commentLength = buffer.readUInt16LE(cursor + 32);
+    const localOffset = buffer.readUInt32LE(cursor + 42);
+    const name = buffer.subarray(cursor + 46, cursor + 46 + filenameLength).toString("utf8");
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const start = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = buffer.subarray(start, start + compressedSize);
+    entries.set(name, method === 8 ? new Uint8Array(inflateRawSync(compressed)) : new Uint8Array(compressed));
+    cursor += 46 + filenameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+describe("sales calculations", () => {
+  it("computes the exact report metrics from CSV", async () => {
+    const metrics = calculateSales(await readFile(resolve(root, "fixtures/attachments/sales.csv"), "utf8"));
+    expect(metrics.months).toEqual([
+      { month: "2026-01", revenueMinor: 1_200_000, orders: 120, averageOrderValueMinor: 10_000 },
+      { month: "2026-02", revenueMinor: 1_500_000, orders: 150, averageOrderValueMinor: 10_000 },
+    ]);
+    expect(metrics.revenueChangeMinor).toBe(300_000);
+    expect(metrics.revenueGrowthPercent).toBe(25);
+    expect(metrics.websiteSharePercent).toEqual({ "2026-01": 66.7, "2026-02": 66.7 });
+  });
+
+  it("changes results when the input changes and handles a zero denominator", () => {
+    const changed = calculateSales("month,channel,revenue_usd,orders\n2026-01,Website,0,0\n2026-02,Website,200,2\n");
+    expect(changed.months[1]?.revenueMinor).toBe(20_000);
+    expect(changed.revenueGrowthPercent).toBeNull();
+    expect(changed.months[0]?.averageOrderValueMinor).toBeNull();
+  });
+
+  it("rejects blank numeric values instead of treating them as zero", () => {
+    expect(() => calculateSales("month,channel,revenue_usd,orders\n2026-01,Website,,1\n2026-02,Website,2,1\n")).toThrow(EngineError);
+  });
+});
+
+describe("fixture pipeline", () => {
+  it("skips an informational message without files", async () => {
+    const result = await runWork(await inputFor("no_action"), deps());
+    expect(result.outcome).toBe("skipped");
+  });
+
+  it("asks stable blocking questions and resumes with supplied answers", async () => {
+    const initial = await runWork(await inputFor("ambiguous"), deps());
+    expect(initial.outcome).toBe("needs_input");
+    if (initial.outcome !== "needs_input") return;
+    expect(initial.questions.map((question) => question.id)).toEqual(["client_identity", "project_scope", "authorized_fee", "project_schedule"]);
+    const answered = await inputFor("ambiguous", { revision: 2, answers: initial.questions.map((question) => ({ questionId: question.id, answer: ({ client_identity: "Northstar Co.", project_scope: "Launch positioning and a four-week content plan", authorized_fee: "USD 6,000", project_schedule: "November 2-29, 2026" } as Record<string, string>)[question.id]! })) });
+    const resumed = await runWork(answered, deps());
+    expect(resumed.outcome).toBe("ready");
+    if (resumed.outcome === "ready") expect(JSON.stringify(resumed.products)).toContain("Northstar Co.");
+  });
+
+  it("exports a grounded proposal DOCX and exactly five-slide PPTX", async () => {
+    const result = await runWork(await inputFor("proposal"), deps());
+    expect(result.outcome).toBe("ready");
+    if (result.outcome !== "ready") return;
+    expect(result.files.map((file) => file.format).sort()).toEqual(["docx", "pptx"]);
+    expect(result.files.every((file) => file.bytes.byteLength > 1_000 && file.bytes[0] === 0x50 && file.bytes[1] === 0x4b)).toBe(true);
+    expect(result.products.find((product) => product.kind === "presentation")?.slides).toHaveLength(5);
+    expect(JSON.stringify(result.products)).toContain("USD 6,000");
+    const docx = unzip(result.files.find((file) => file.format === "docx")!.bytes);
+    expect(Buffer.from(docx.get("word/document.xml")!).toString("utf8")).toContain("Maple &amp; Moss Launch Strategy Proposal");
+    const pptx = unzip(result.files.find((file) => file.format === "pptx")!.bytes);
+    expect([...pptx.keys()].filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))).toHaveLength(5);
+    expect(Buffer.from(pptx.get("ppt/slides/slide1.xml")!).toString("utf8")).toContain("Maple &amp; Moss launch strategy");
+    if (process.env.ENGINE_RENDER_DIR) {
+      await mkdir(process.env.ENGINE_RENDER_DIR, { recursive: true });
+      await Promise.all(result.files.map((file) => writeFile(resolve(process.env.ENGINE_RENDER_DIR!, file.filename), file.bytes)));
+    }
+  }, 20_000);
+
+  it("keeps report preview, chart, and exported files on calculated values", async () => {
+    const result = await runWork(await inputFor("report"), deps());
+    expect(result.outcome).toBe("ready");
+    if (result.outcome !== "ready") return;
+    const text = JSON.stringify(result.products);
+    expect(text).toContain("$12,000");
+    expect(text).toContain("$15,000");
+    expect(text).toContain("25%");
+    expect(text).toContain("66.7%");
+    expect(result.products.find((product) => product.kind === "presentation")?.slides).toHaveLength(5);
+  }, 20_000);
+
+  it("treats prompt injection attachment text as data and retains normal policy", async () => {
+    const base = await inputFor("proposal");
+    const injection = new Uint8Array(await readFile(resolve(root, "fixtures/attachments/prompt-injection.txt")));
+    base.email.attachments.push({ id: "att-injection", filename: "prompt-injection.txt", mimeType: "text/plain", sizeBytes: injection.byteLength });
+    base.attachments.push({ id: "att-injection", filename: "prompt-injection.txt", mimeType: "text/plain", bytes: injection });
+    const result = await runWork(base, deps());
+    expect(result.outcome).toBe("ready");
+    if (result.outcome === "ready") {
+      expect(result.files).toHaveLength(2);
+      expect(JSON.stringify(result.products)).not.toContain("attacker@example.com");
+    }
+  });
+
+  it("rejects an attachment over the per-file limit", async () => {
+    const base = await inputFor("proposal");
+    base.attachments[0] = { ...base.attachments[0]!, bytes: new Uint8Array(10 * 1024 * 1024 + 1) };
+    await expect(runWork(base, deps())).rejects.toMatchObject({ code: "INPUT_LIMIT", retryable: false });
+  });
+
+  it("uses stable file IDs for a revision and different IDs for a new revision", async () => {
+    const first = await runWork(await inputFor("proposal"), deps());
+    const retry = await runWork(await inputFor("proposal"), deps());
+    const next = await runWork(await inputFor("proposal", { revision: 2 }), deps());
+    if (first.outcome !== "ready" || retry.outcome !== "ready" || next.outcome !== "ready") throw new Error("unexpected outcome");
+    expect(first.files.map((file) => file.id)).toEqual(retry.files.map((file) => file.id));
+    expect(first.files.map((file) => file.id)).not.toEqual(next.files.map((file) => file.id));
+  }, 30_000);
+});
+
+describe("live configuration", () => {
+  it("fails clearly without credentials and never falls back to fixtures", async () => {
+    const previous = { provider: process.env.MODEL_PROVIDER, model: process.env.MODEL_NAME, key: process.env.OPENAI_API_KEY };
+    delete process.env.MODEL_PROVIDER; delete process.env.MODEL_NAME; delete process.env.OPENAI_API_KEY;
+    await expect(runWork(await inputFor("proposal", { mode: "live" }), deps())).rejects.toMatchObject({ code: "MODEL_CONFIGURATION", retryable: false });
+    process.env.MODEL_PROVIDER = previous.provider; process.env.MODEL_NAME = previous.model; process.env.OPENAI_API_KEY = previous.key;
+  });
+});

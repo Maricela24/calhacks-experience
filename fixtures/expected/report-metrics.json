@@ -1,1 +1,15 @@
-{ "placeholder": "Person 2 owns this file", "january": 12000, "february": 15000, "absoluteChange": 3000, "growthPercent": 25 }
+{
+  "currency": "USD",
+  "months": {
+    "2026-01": { "revenueMinor": 1200000, "orders": 120, "averageOrderValueMinor": 10000 },
+    "2026-02": { "revenueMinor": 1500000, "orders": 150, "averageOrderValueMinor": 10000 }
+  },
+  "revenueChangeMinor": 300000,
+  "revenueGrowthPercent": 25,
+  "orderGrowthPercent": 25,
+  "channels": {
+    "Website": { "2026-01": 800000, "2026-02": 1000000 },
+    "Partnerships": { "2026-01": 400000, "2026-02": 500000 }
+  },
+  "websiteSharePercent": { "2026-01": 66.7, "2026-02": 66.7 }
+}
